@@ -12,14 +12,18 @@ from sklearn.model_selection import train_test_split
 import tensorflow as tf
 
 FLAGS = {
-        'IMAGE_SIZE':      100,
+        'IMAGE_SIZE':       299,
         'IMAGE_CHANNELS':   3,
         'DATA_DIR':         './data/',
         'SRC_DIR':          './raw/train/',
+        'KAGGLE_DIR':       './raw/test/',
+        'LOG_DIR':          './log/',
+        'CHECKPOINT_DIR':   './checkpoints/',
         'IMAGE_PATTERN':    '*.jpg',
 
         'TRAIN_SIZE' :      0.8,
         'TEST_SIZE':        0.15,
+        'BATCH_SIZE':       50,
         }
 
 def image_len():
@@ -30,8 +34,46 @@ def image_dim(include_channels=False):
         return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_CHANNELS'])
     return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'])
 
-reader = tf.WholeFileReader()
+def _raw_inputs(name, num_epochs, omit_label):
+    file_queue = tf.train.string_input_producer([os.path.join(FLAGS['DATA_DIR'], name+'.tfrecords')], num_epochs=num_epochs)
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(file_queue)
+    if omit_label:
+        features = tf.parse_single_example(serialized_example, features={
+            'image_raw': tf.FixedLenFeature([], tf.string),
+            })
+        label = None
+    else:
+        features = tf.parse_single_example(serialized_example, features={
+            'image_raw': tf.FixedLenFeature([], tf.string),
+            'label': tf.FixedLenFeature([], tf.int64),
+            })
+        label = tf.cast(features['label'], tf.float32)
 
+    image = tf.decode_raw(features['image_raw'], tf.uint8)
+    image.set_shape(image_len())
+
+    return image, label
+
+"""Return a batch of image, label pairs.
+
+Arguments:
+    name    the TFRecord file to read, e.g. `train` or `test`
+    display if `True`, the pixel values are not normalised to [-0.5, 0.5],
+            so that the images can be easily displayed on screen.
+"""
+def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, omit_labels=False):
+    image, label = _raw_inputs(name, num_epochs, omit_label=omit_labels)
+
+    # setting display=True disables centering and normalisation so images can be correctly displayed
+    if not display:
+        image = tf.cast(image, tf.float32) * (1./255) - 0.5
+
+    images, labels = tf.train.shuffle_batch([image, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, allow_smaller_final_batch=True, num_threads=4)
+    labels = tf.reshape(labels, [batch_size, 1])
+    return images, labels
+
+reader = tf.WholeFileReader()
 # read JPEG data from a file, decode it into an image (i.e. numpy array), then resize it appropriately
 def read_image(filename_queue):
     key, content = reader.read(filename_queue)
@@ -66,12 +108,12 @@ def save_records(files, name, omit_labels=False):
             image_raw = image.tostring()
 
             if omit_labels:
-                # no need to save height, width and depth as this is known to be 40x40x3
+                # no need to save height, width and depth as this is known to be 299x299x3
                 example = tf.train.Example(features=tf.train.Features(feature={
                     'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
                     }))
             else:
-                # no need to save height, width and depth as this is known to be 40x40x3
+                # no need to save height, width and depth as this is known to be 299x299x3
                 example = tf.train.Example(features=tf.train.Features(feature={
                     'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
                     'label': tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
