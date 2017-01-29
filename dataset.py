@@ -34,11 +34,11 @@ def image_dim(include_channels=False):
         return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_CHANNELS'])
     return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'])
 
-def _raw_inputs(name, num_epochs, omit_label):
+def _raw_inputs(name, num_epochs, predict):
     file_queue = tf.train.string_input_producer([os.path.join(FLAGS['DATA_DIR'], name+'.tfrecords')], num_epochs=num_epochs)
     reader = tf.TFRecordReader()
     _, serialized_example = reader.read(file_queue)
-    if omit_label:
+    if predict:
         features = tf.parse_single_example(serialized_example, features={
             'image_raw': tf.FixedLenFeature([], tf.string),
             })
@@ -62,12 +62,15 @@ Arguments:
     display if `True`, the pixel values are not normalised to [-0.5, 0.5],
             so that the images can be easily displayed on screen.
 """
-def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, omit_labels=False):
-    image, label = _raw_inputs(name, num_epochs, omit_label=omit_labels)
+def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, predict=False):
+    image, label = _raw_inputs(name, num_epochs, predict=predict)
 
     # setting display=True disables centering and normalisation so images can be correctly displayed
     if not display:
         image = tf.cast(image, tf.float32) * (1./255) - 0.5
+
+    if predict:
+        return tf.train.batch([image], batch_size=batch_size, capacity=1000+3*batch_size, allow_smaller_final_batch=True, num_threads=4)
 
     images, labels = tf.train.shuffle_batch([image, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, allow_smaller_final_batch=True, num_threads=4)
     labels = tf.reshape(labels, [batch_size, 1])
