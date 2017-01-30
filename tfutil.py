@@ -196,7 +196,7 @@ def run_setup(name):
     create_if_needed(checkpoint_dir(name))
 
 """Run some operation inside a session, starting threads as needed."""
-def run_in_tf(func, after, name, checkpoint=None, loop=True, **func_args):
+def run_in_tf(func, after, name, checkpoint=None, **func_args):
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
     saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
@@ -222,9 +222,10 @@ def run_in_tf(func, after, name, checkpoint=None, loop=True, **func_args):
             }
 
     def after_func(step):
-        after(step=step, **func_args, **kwargs)
+        if after is not None:
+            after(step=step, **func_args, **kwargs)
 
-    if loop:
+    if func is not None:
         try:
             while not coord.should_stop():
                 func(step=step, **func_args, **kwargs)
@@ -321,7 +322,7 @@ def _prediction_after(step, name, **kwargs):
 
 def run_eval(name, train_accuracy_op, valid_accuracy_op, test_accuracy_op):
     checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
-    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, loop=False, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
+    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
     pass
 
 def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, **kwargs):
