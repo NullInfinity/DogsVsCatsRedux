@@ -198,14 +198,18 @@ def run_setup(name):
 """Run some operation inside a session, starting threads as needed."""
 def run_in_tf(func, after, name, checkpoint=None, **func_args):
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
-    saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
+    try:
+        saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
+    except ValueError: # no variables to save
+        saver = None
+
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
 
     summary_op = tf.summary.merge_all()
     log_writer = tf.summary.FileWriter(logdir=os.path.join(FLAGS['LOG_DIR'], name), graph=sess.graph)
 
     sess.run(init_op)
-    if checkpoint:
+    if checkpoint and saver is not None:
         saver.restore(sess, checkpoint.model_checkpoint_path)
 
     coord = tf.train.Coordinator()
@@ -289,7 +293,8 @@ def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid
 
 def _training_after(train_accuracy_op, valid_accuracy_op, test_accuracy_op, sess, saver, step, name, **kwargs_unused):
     print('Done training for {} steps.'.format(step))
-    saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
+    if saver is not None:
+        saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
     _run_eval(
             sess=sess,
             train_accuracy_op=train_accuracy_op,
