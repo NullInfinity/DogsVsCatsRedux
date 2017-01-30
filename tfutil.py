@@ -209,6 +209,43 @@ def run_setup(name):
     create_if_needed(log_dir(name))
     create_if_needed(checkpoint_dir(name))
 
+"""Run some operation inside a session, starting threads as needed."""
+def run_in_tf(func, after, name, checkpoint=None, loop=True, **func_args):
+    init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
+    sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+
+    summary_op = tf.summary.merge_all()
+    log_writer = tf.summary.FileWriter(logdir=os.path.join(FLAGS['LOG_DIR'], name), graph=sess.graph)
+
+    sess.run(init_op)
+    if checkpoint:
+        saver.restore(sess, checkpoint.model_checkpoint_path)
+
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+    step = 0
+
+    def after_func():
+        after(**func_args, sess=sess, saver=saver, log_writer=log_writer, summary_op=summary_op, step=step, name=name)
+
+    if loop:
+        try:
+            while not coord.should_stop():
+                func(**func_args, sess=sess, saver=saver, step=step, name=name, summary_op=summary_op, log_writer=log_writer)
+                step += 1
+        except tf.errors.OutOfRangeError:
+            after_func()
+        finally:
+            coord.request_stop()
+    else:
+        after_func()
+        coord.request_stop()
+
+    coord.join(threads)
+    sess.close()
+
 """Run training, write summaries and do evaluation, given computed logits and labels.
 
 Arguments:
@@ -225,96 +262,67 @@ def run_training(logits, labels, valid_accuracy_op, test_accuracy_op, name, lear
     loss = loss_op(logits, labels)
     train = train_op(loss, learning_rate=learning_rate)
 
-    summary_op = tf.summary.merge_all()
+    run_in_tf(func=_training_func, after=_training_after, name=name, loss=loss, train=train, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
 
-    init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+def _print_accuracy(sess, accuracy_op, label):
+    if accuracy_op is not None:
+        accuracy = avg_op(sess, accuracy_op)
+        print('{} accuracy: {:.1%}'.format(label, accuracy))
 
-    saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
+def _training_func(loss, train, log_writer, summary_op, valid_accuracy_op, sess, saver, step ,name, **kwargs_unused):
+    if step % 1000 == 0:
+        _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
 
-    # create session and summary writer
-    sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-    log_writer = tf.summary.FileWriter(logdir=os.path.join(FLAGS['LOG_DIR'], name), graph=sess.graph)
-
-    # run ops
-    sess.run(init_op)
-
-    coord = tf.train.Coordinator()
-    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
-
-    try:
-        step = 0
-        while not coord.should_stop():
-
-            if valid_accuracy_op is not None and step % 1000 == 0:
-                accuracy = avg_op(sess, valid_accuracy_op)
-                print('Validation accuracy: {acc:.1%}'.format(acc=accuracy))
-
-            if step % 250 == 0:
-                summary, xentropy = sess.run([summary_op, loss])
-                saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
-                log_writer.add_summary(summary, global_step=step)
-                print('Cross Entropy: {xentropy:.2n}'.format(xentropy=xentropy))
-
-            if step % 100 == 0:
-                summary = sess.run(summary_op)
-                log_writer.add_summary(summary, global_step=step)
-
-            sess.run(train)
-
-            step += 1
-
-    except tf.errors.OutOfRangeError:
-        print('Done training for {} steps.'.format(step))
+    if step % 250 == 0:
+        summary, xentropy = sess.run([summary_op, loss])
         saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
-        if test_accuracy_op is not None:
-            test_accuracy = avg_op(sess, test_accuracy_op)
-            print('Test accuracy: {acc:.1%}'.format(acc=test_accuracy))
-    finally:
-        coord.request_stop()
+        log_writer.add_summary(summary, global_step=step)
+        print('Cross Entropy: {xentropy:.2n}'.format(xentropy=xentropy))
 
-    coord.join(threads)
-    sess.close()
+    if step % 100 == 0:
+        summary = sess.run(summary_op)
+        log_writer.add_summary(summary, global_step=step)
+
+    sess.run(train)
+
+def _training_after(valid_accuracy_op, test_accuracy_op, sess, saver, step, name, **kwargs_unused):
+    print('Done training for {} steps.'.format(step))
+    saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
+    _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
+    _print_accuracy(sess=sess, accuracy_op=test_accuracy_op, label='Test')
 
 """Make predictions given a logit node in the graph, using the model at its current state of training."""
 def run_prediction(logits, name):
     outfile = open(prediction_file(name), 'wb')
-
-    # header
     outfile.write(b'id,label\n')
 
     activation_op = tf.nn.sigmoid(logits)
-    init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
-
-    saver = tf.train.Saver()
     checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
 
-    sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
-
-    sess.run(init_op)
-    saver.restore(sess, checkpoint.model_checkpoint_path)
-
-    coord = tf.train.Coordinator()
-    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
-
-    step = 0
-    try:
-        while not coord.should_stop():
-            dog_prob = sess.run(activation_op).reshape([-1, 1])
-            id_column = np.arange(FLAGS['BATCH_SIZE']).reshape([-1, 1]) + step * FLAGS['BATCH_SIZE'] + 1
-
-            np.savetxt(fname=outfile, X=np.append(id_column, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
-            outfile.flush()
-
-            step += 1
-    except tf.errors.OutOfRangeError:
-        print('Wrote {} predictions to {}'.format(step * FLAGS['BATCH_SIZE'], prediction_file(name)))
-    finally:
-        coord.request_stop()
-
-    coord.join(threads)
-    sess.close()
+    run_in_tf(func=_prediction_func, after=_prediction_after, outfile=outfile, activation_op=activation_op, checkpoint=checkpoint, name=name)
 
     outfile.close()
+
+# helper ops for run_prediction
+def _prediction_func(outfile, activation_op, sess, saver, step, name, **kwargs_unused):
+    dog_prob = sess.run(activation_op).reshape([-1, 1])
+    id_column = np.arange(FLAGS['BATCH_SIZE']).reshape([-1, 1]) + step * FLAGS['BATCH_SIZE'] + 1
+
+    np.savetxt(fname=outfile, X=np.append(id_column, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
+    outfile.flush()
+
+def _prediction_after(step, name, **kwargs):
+    print('Wrote {} predictions to {}'.format(step * FLAGS['BATCH_SIZE'], prediction_file(name)))
+
+def run_eval(name, train_accuracy_op, valid_accuracy_op, test_accuracy_op):
+    checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
+    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, loop=False, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
+    pass
+
+def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, **kwargs):
+    _print_accuracy(sess=sess, accuracy_op=train_accuracy_op, label='Train')
+    _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
+    _print_accuracy(sess=sess, accuracy_op=test_accuracy_op, label='Test')
 
 """Run all operations.
 
@@ -329,9 +337,15 @@ def run_all(inference_op, inputs, total_epochs, learning_rate, name, do_training
     run_cleanup(name=name, do_training=do_training)
     run_setup(name=name)
 
-    ## TRAINING
+    ## create graph nodes for prediction on train, validation and test sets
+
     images, labels = inputs(name='train', num_epochs=total_epochs)
     logits = inference_op(images, train=True)
+
+    # train images again for evaluation purposes
+    train_images, train_labels = inputs(name='train', num_epochs=None)
+    train_logits = inference_op(train_images, train=False)
+    train_accuracy_op = accuracy_op(train_logits, train_labels, name='train')
 
     valid_images, valid_labels = inputs(name='validation', num_epochs=None)
     valid_logits = inference_op(valid_images, train=False)
@@ -341,11 +355,22 @@ def run_all(inference_op, inputs, total_epochs, learning_rate, name, do_training
     test_logits = inference_op(test_images, train=False)
     test_accuracy_op = accuracy_op(test_logits, test_labels, name='test')
 
+    # if desired, do training (with evaluation)
     if do_training:
-        run_training(logits, labels, valid_accuracy_op, test_accuracy_op, learning_rate=learning_rate, name=name)
+        run_training(logits=logits,
+                labels=labels,
+                valid_accuracy_op=valid_accuracy_op,
+                test_accuracy_op=test_accuracy_op,
+                learning_rate=learning_rate,
+                name=name)
+    else: # otherwise just evaluate
+        run_eval(name=name,
+                train_accuracy_op=train_accuracy_op,
+                valid_accuracy_op=valid_accuracy_op,
+                test_accuracy_op=test_accuracy_op)
 
-    ## PREDICTION
+    # and do prediction on Kaggle test images
     kaggle_images = inputs(name='kaggle', num_epochs=1, predict=True)
     kaggle_logits = inference_op(kaggle_images, train=False)
 
-    run_prediction(kaggle_logits, name=name)
+    run_prediction(logits=kaggle_logits, name=name)
