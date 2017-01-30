@@ -227,13 +227,21 @@ def run_in_tf(func, after, name, checkpoint=None, loop=True, **func_args):
 
     step = 0
 
+    kwargs = {
+            'sess': sess,
+            'saver': saver,
+            'log_writer': log_writer,
+            'summary_op': summary_op,
+            'name': name,
+            }
+
     def after_func():
-        after(**func_args, sess=sess, saver=saver, log_writer=log_writer, summary_op=summary_op, step=step, name=name)
+        after(**func_args, **kwargs)
 
     if loop:
         try:
             while not coord.should_stop():
-                func(**func_args, sess=sess, saver=saver, step=step, name=name, summary_op=summary_op, log_writer=log_writer)
+                func(**func_args, **kwargs, step=step)
                 step += 1
         except tf.errors.OutOfRangeError:
             after_func()
@@ -258,20 +266,27 @@ Arguments:
     name                the name of the model, used for log and checkpoint directories
     learning_rate       the learning rate to use for training
 """
-def run_training(logits, labels, valid_accuracy_op, test_accuracy_op, name, learning_rate):
+def run_training(logits, labels, train_accuracy_op, valid_accuracy_op, test_accuracy_op, name, learning_rate):
     loss = loss_op(logits, labels)
     train = train_op(loss, learning_rate=learning_rate)
 
-    run_in_tf(func=_training_func, after=_training_after, name=name, loss=loss, train=train, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
+    run_in_tf(func=_training_func,
+              after=_training_after,
+              name=name,
+              loss=loss,
+              train=train,
+              train_accuracy_op=train_accuracy_op,
+              valid_accuracy_op=valid_accuracy_op,
+              test_accuracy_op=test_accuracy_op)
 
 def _print_accuracy(sess, accuracy_op, label):
     if accuracy_op is not None:
         accuracy = avg_op(sess, accuracy_op)
         print('{} accuracy: {:.1%}'.format(label, accuracy))
 
-def _training_func(loss, train, log_writer, summary_op, valid_accuracy_op, sess, saver, step ,name, **kwargs_unused):
+def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid_accuracy_op, sess, saver, step ,name, **kwargs_unused):
     if step % 1000 == 0:
-        _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
+        _run_eval(sess=sess, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=None)
 
     if step % 250 == 0:
         summary, xentropy = sess.run([summary_op, loss])
@@ -355,19 +370,18 @@ def run_all(inference_op, inputs, total_epochs, learning_rate, name, do_training
     test_logits = inference_op(test_images, train=False)
     test_accuracy_op = accuracy_op(test_logits, test_labels, name='test')
 
+    kwargs = {
+            'train_accuracy_op': train_accuracy_op,
+            'valid_accuracy_op': valid_accuracy_op,
+            'test_accuracy_op':  test_accuracy_op,
+            'name': name,
+            }
+
     # if desired, do training (with evaluation)
     if do_training:
-        run_training(logits=logits,
-                labels=labels,
-                valid_accuracy_op=valid_accuracy_op,
-                test_accuracy_op=test_accuracy_op,
-                learning_rate=learning_rate,
-                name=name)
+        run_training(logits=logits, labels=labels, learning_rate=learning_rate, **kwargs)
     else: # otherwise just evaluate
-        run_eval(name=name,
-                train_accuracy_op=train_accuracy_op,
-                valid_accuracy_op=valid_accuracy_op,
-                test_accuracy_op=test_accuracy_op)
+        run_eval(**kwargs)
 
     # and do prediction on Kaggle test images
     kaggle_images = inputs(name='kaggle', num_epochs=1, predict=True)
