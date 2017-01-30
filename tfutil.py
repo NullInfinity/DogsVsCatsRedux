@@ -12,7 +12,8 @@ from dataset import FLAGS
 """Create a weight variable initalized with a random normal distribution.
 
 The variable name is `weights` (it is assumed the variable is suitably scoped
-by a `tf.name_scope`.
+by a `tf.name_scope`. The variance is chosen using Xavier initialization
+modified for ReLU nonlinearities, see e.g. arXiv:1502.01852 [cs.CV].
 
 Arguments:
     shape   the shape of the variable
@@ -23,38 +24,17 @@ Arguments:
 Returns:
     A `tf.Variable` with the above properties.
 """
-def weight_variable(shape, variance):
-    a = math.sqrt(3. * variance)
+def weight_variable(shape):
     return tf.get_variable(
             name='weights',
             shape=shape,
-            dtype=tf.float32,
-            initializer=tf.random_uniform(
-                shape=shape,
-                minval=-a,
-                maxval=a,
+            initializer=tf.uniform_unit_scaling_initializer(
+                # this factor of ~sqrt(2) in the stddev (i.e. 2 in the variance)
+                # has been found to be suitable when relu nonlinearities are used
+                # see, e.g. arXiv:1502.01852 [cs.CV]
+                factor=1.43,
                 dtype=tf.float32)
             )
-
-"""Create a weight variable for a convolution initialized with ReLU Xavier initialization.
-
-Arguments:
-    shape       the shape of the variable
-
-Initial values are drawn from a normal distribution with mean 0 and variance
-  2./shape.
-This ensures that the overall layer variance is independent of layer size.
-Essentially, this is Xavier initialization, but with an added factor of two,
-which has been shown to work well with ReLU nonlinearities. [1]
-
-[1] TODO citation
-"""
-def xavier_weight_variable(shape):
-    size = 1
-    for s in shape:
-        size *= s
-    variance = 2. / size
-    return weight_variable(shape=shape, variance=variance)
 
 """Create a weight variable for a convolution initialized with ReLU Xavier initialization.
 
@@ -66,7 +46,7 @@ The variable shape will be `[ksize, ksize, channels_in, channels_out]`.
 """
 def conv_weight_variable(size, channels):
     shape = [size, size] + channels
-    return xavier_weight_variable(shape=shape)
+    return weight_variable(shape=shape)
 
 """Create a weight variable for a fully connected layer initialized with ReLU Xavier initialization.
 
@@ -77,7 +57,7 @@ Arguments:
 The variable shape will be `[size_in, size_out]`.
 """
 def fc_weight_variable(size_in, size_out):
-    return xavier_weight_variable(shape=[size_in, size_out])
+    return weight_variable(shape=[size_in, size_out])
 
 """Create a bias variable initalized with constants.
 
@@ -96,8 +76,9 @@ def bias_variable(shape, value=0.1):
     return tf.get_variable(
             name='bias',
             shape=shape,
-            dtype=tf.float32,
-            initializer=tf.constant_initializer(value=value)
+            initializer=tf.constant_initializer(
+                value=value,
+                dtype=tf.float32)
             )
 
 
