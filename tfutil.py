@@ -24,13 +24,13 @@ Returns:
     A `tf.Variable` with the above properties.
 """
 def weight_variable(shape, variance):
+    a = math.sqrt(3. * variance)
     return tf.get_variable(
-            a = math.sqrt(3. * variance)
             name='weights',
             shape=shape,
             dtype=tf.float32,
-            initializer=tf.random_normal(
-                shape=shape
+            initializer=tf.random_uniform(
+                shape=shape,
                 minval=-a,
                 maxval=a,
                 dtype=tf.float32)
