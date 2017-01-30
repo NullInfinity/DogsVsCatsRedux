@@ -23,12 +23,17 @@ Arguments:
 Returns:
     A `tf.Variable` with the above properties.
 """
-def weight_variable(shape, mean=0.0, stddev=0.1):
+def weight_variable(shape, variance):
     return tf.get_variable(
+            a = math.sqrt(3. * variance)
             name='weights',
             shape=shape,
             dtype=tf.float32,
-            initializer=tf.truncated_normal_initializer(mean=mean, stddev=stddev)
+            initializer=tf.random_normal(
+                shape=shape
+                minval=-a,
+                maxval=a,
+                dtype=tf.float32)
             )
 
 """Create a weight variable for a convolution initialized with ReLU Xavier initialization.
@@ -48,8 +53,8 @@ def xavier_weight_variable(shape):
     size = 1
     for s in shape:
         size *= s
-    stddev = math.sqrt(2. / size)
-    return weight_variable(shape=shape, mean=0.0, stddev=stddev)
+    variance = 2. / size
+    return weight_variable(shape=shape, variance=variance)
 
 """Create a weight variable for a convolution initialized with ReLU Xavier initialization.
 
@@ -235,20 +240,20 @@ def run_in_tf(func, after, name, checkpoint=None, loop=True, **func_args):
             'name': name,
             }
 
-    def after_func():
-        after(**func_args, **kwargs)
+    def after_func(step):
+        after(step=step, **func_args, **kwargs)
 
     if loop:
         try:
             while not coord.should_stop():
-                func(**func_args, **kwargs, step=step)
+                func(step=step, **func_args, **kwargs)
                 step += 1
         except tf.errors.OutOfRangeError:
-            after_func()
+            after_func(step=step)
         finally:
             coord.request_stop()
     else:
-        after_func()
+        after_func(step=step)
         coord.request_stop()
 
     coord.join(threads)
