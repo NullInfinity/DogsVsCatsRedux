@@ -286,11 +286,15 @@ def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid
 
     sess.run(train)
 
-def _training_after(valid_accuracy_op, test_accuracy_op, sess, saver, step, name, **kwargs_unused):
+def _training_after(train_accuracy_op, valid_accuracy_op, test_accuracy_op, sess, saver, step, name, **kwargs_unused):
     print('Done training for {} steps.'.format(step))
     saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
-    _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
-    _print_accuracy(sess=sess, accuracy_op=test_accuracy_op, label='Test')
+    _run_eval(
+            sess=sess,
+            train_accuracy_op=train_accuracy_op,
+            valid_accuracy_op=valid_accuracy_op,
+            test_accuracy_op=test_accuracy_op
+            )
 
 """Make predictions given a logit node in the graph, using the model at its current state of training."""
 def run_prediction(logits, name):
