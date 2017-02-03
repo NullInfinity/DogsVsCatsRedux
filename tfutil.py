@@ -24,7 +24,7 @@ Arguments:
 Returns:
     A `tf.Variable` with the above properties.
 """
-def weight_variable(shape):
+def weight_variable(shape, factor=1.43):
     return tf.get_variable(
             name='weights',
             shape=shape,
@@ -32,7 +32,7 @@ def weight_variable(shape):
                 # this factor of ~sqrt(2) in the stddev (i.e. 2 in the variance)
                 # has been found to be suitable when relu nonlinearities are used
                 # see, e.g. arXiv:1502.01852 [cs.CV]
-                factor=1.43,
+                factor=factor,
                 dtype=tf.float32)
             )
 
@@ -109,24 +109,47 @@ def pool_op(X, size, stride, name, padding='SAME', mode='avg'):
             raise BadPoolMode()
     return h_pool
 
-def fc_op(X, channels_in, channels_out, name, relu=True):
+# global dictionary of regularisation terms
+_reg_terms = dict()
+
+# alpha - scale factor for L2 regularisation
+def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=True):
     with tf.variable_scope(name):
         weights = fc_weight_variable(channels_in, channels_out)
         bias = bias_variable(channels_out)
+        tf.summary.histogram(name=name+'_weights', values=weights)
+
         h_fc = tf.matmul(X, weights) + bias
         if relu:
             h_out = tf.nn.relu(h_fc)
         else:
             h_out = h_fc
+
+        # regularisation
+        loss_name = name + '_loss'
+        loss = alpha * tf.nn.l2_loss(weights, name=loss_name)
+
+    # register loss
+    if reg_terms is not None and not tf.get_variable_scope().reuse: # if reuse is set, don't add regularisation termloss again
+        reg_terms.append(alpha * loss)
+
     return h_out
 
 ######## GRAPH BUILDING
 """Add nodes to the graph to compute cross entropy and write it to summary files."""
-def loss_op(logits, labels):
-    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels, name='xentropy')
-    cross_entropy_avg = tf.reduce_mean(cross_entropy, name='xentropy_avg')
-    tf.summary.scalar('xentropy_avg', cross_entropy_avg)
-    return cross_entropy_avg
+def loss_op(logits, labels, name='', reg_terms=None):
+    name = name + ('_' if name else '') + 'xentropy'
+    cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels, name=name)
+    cross_entropy_avg = tf.reduce_mean(cross_entropy, name=name+'_avg')
+    tf.summary.scalar(name+'_avg', cross_entropy_avg)
+
+    loss = cross_entropy_avg
+
+    if reg_terms is not None:
+        for reg_term in reg_terms:
+            loss += reg_term
+
+    return loss
 
 """Add nodes to the graph to compute accuracy and write it to summary files."""
 def accuracy_op(logits, labels, name=''):
@@ -151,7 +174,7 @@ Arguments:
 
 Number of batches is `ceil(num_examples / BATCH_SIZE)
 """
-def avg_op(sess, op, num_examples=10000):
+def avg_op(sess, op, num_examples=2500):
     num_batches = int(math.ceil(num_examples / FLAGS['BATCH_SIZE']))
     acc = np.zeros(op.get_shape())
     for i in range(num_batches):
@@ -257,8 +280,8 @@ Arguments:
     name                the name of the model, used for log and checkpoint directories
     learning_rate       the learning rate to use for training
 """
-def run_training(logits, labels, train_accuracy_op, valid_accuracy_op, test_accuracy_op, name, learning_rate):
-    loss = loss_op(logits, labels)
+def run_training(logits, labels, name, learning_rate, reg_terms, **kwargs):
+    loss = loss_op(logits, labels, reg_terms=reg_terms)
     train = train_op(loss, learning_rate=learning_rate)
 
     run_in_tf(func=_training_func,
@@ -266,18 +289,19 @@ def run_training(logits, labels, train_accuracy_op, valid_accuracy_op, test_accu
               name=name,
               loss=loss,
               train=train,
-              train_accuracy_op=train_accuracy_op,
-              valid_accuracy_op=valid_accuracy_op,
-              test_accuracy_op=test_accuracy_op)
+              reg_terms=reg_terms,
+              **kwargs)
 
-def _print_accuracy(sess, accuracy_op, label):
-    if accuracy_op is not None:
-        accuracy = avg_op(sess, accuracy_op)
-        print('{} accuracy: {:.1%}'.format(label, accuracy))
+def _print_avg_op(sess, op, label, percent=False):
+    if op is not None:
+        avg_value = avg_op(sess, op)
+        number_format_string = '.1%' if percent else '.2f'
+        format_string = '{}: {:' + number_format_string + '}'
+        print(format_string.format(label, avg_value))
 
-def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid_accuracy_op, sess, saver, step ,name, **kwargs_unused):
+def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid_accuracy_op, train_loss_op, valid_loss_op, sess, saver, step, name, **kwargs_unused):
     if step % 1000 == 0:
-        _run_eval(sess=sess, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=None)
+        _run_eval(sess=sess, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=None, train_loss_op=train_loss_op, valid_loss_op=valid_loss_op, test_loss_op=None)
 
     if step % 250 == 0:
         summary, xentropy = sess.run([summary_op, loss])
@@ -291,49 +315,47 @@ def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid
 
     sess.run(train)
 
-def _training_after(train_accuracy_op, valid_accuracy_op, test_accuracy_op, sess, saver, step, name, **kwargs_unused):
+def _training_after(sess, saver, step, name, **kwargs):
     print('Done training for {} steps.'.format(step))
     if saver is not None:
         saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
-    _run_eval(
-            sess=sess,
-            train_accuracy_op=train_accuracy_op,
-            valid_accuracy_op=valid_accuracy_op,
-            test_accuracy_op=test_accuracy_op
-            )
+    _run_eval(sess=sess, **kwargs)
 
 """Make predictions given a logit node in the graph, using the model at its current state of training."""
-def run_prediction(logits, name):
+def run_prediction(logits, image_ids, name):
     outfile = open(prediction_file(name), 'wb')
     outfile.write(b'id,label\n')
 
     activation_op = tf.nn.sigmoid(logits)
     checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
 
-    run_in_tf(func=_prediction_func, after=_prediction_after, outfile=outfile, activation_op=activation_op, checkpoint=checkpoint, name=name)
+    run_in_tf(func=_prediction_func, after=_prediction_after, outfile=outfile, activation_op=activation_op, image_ids=image_ids, checkpoint=checkpoint, name=name)
 
     outfile.close()
 
 # helper ops for run_prediction
-def _prediction_func(outfile, activation_op, sess, saver, step, name, **kwargs_unused):
-    dog_prob = sess.run(activation_op).reshape([-1, 1])
-    id_column = np.arange(FLAGS['BATCH_SIZE']).reshape([-1, 1]) + step * FLAGS['BATCH_SIZE'] + 1
+def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name, **kwargs_unused):
+    dog_prob, image_id = sess.run([activation_op, image_ids])
+    dog_prob = dog_prob.reshape([-1, 1])
 
-    np.savetxt(fname=outfile, X=np.append(id_column, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
+    np.savetxt(fname=outfile, X=np.append(image_id, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
     outfile.flush()
 
 def _prediction_after(step, name, **kwargs):
     print('Wrote {} predictions to {}'.format(step * FLAGS['BATCH_SIZE'], prediction_file(name)))
 
-def run_eval(name, train_accuracy_op, valid_accuracy_op, test_accuracy_op):
+def run_eval(name, **kwargs):
     checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
-    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, train_accuracy_op=train_accuracy_op, valid_accuracy_op=valid_accuracy_op, test_accuracy_op=test_accuracy_op)
+    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, **kwargs)
     pass
 
-def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, **kwargs):
-    _print_accuracy(sess=sess, accuracy_op=train_accuracy_op, label='Train')
-    _print_accuracy(sess=sess, accuracy_op=valid_accuracy_op, label='Validation')
-    _print_accuracy(sess=sess, accuracy_op=test_accuracy_op, label='Test')
+def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, train_loss_op, valid_loss_op, test_loss_op, **kwargs):
+    _print_avg_op(sess=sess, op=train_accuracy_op, label='Train Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=valid_accuracy_op, label='Validation Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=test_accuracy_op, label='Test Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=train_loss_op, label='Train Loss')
+    _print_avg_op(sess=sess, op=valid_loss_op, label='Validation Loss')
+    _print_avg_op(sess=sess, op=test_loss_op, label='Test Loss')
 
 """Run all operations.
 
@@ -344,7 +366,7 @@ Arguments:
     learning_rate   learning rate hyperparameter passed to the optimizer
     name            the name of the network (used as a sub directory for logs, checkpoints, etc)
 """
-def run_all(inference_op, inputs, total_epochs, learning_rate, name, do_training=True):
+def run_all(inference_op, inputs, total_epochs, learning_rate, name, reg_terms, do_training=True):
     run_cleanup(name=name, do_training=do_training)
     run_setup(name=name)
 
@@ -357,30 +379,36 @@ def run_all(inference_op, inputs, total_epochs, learning_rate, name, do_training
     train_images, train_labels = inputs(name='train', num_epochs=None)
     train_logits = inference_op(train_images, train=False)
     train_accuracy_op = accuracy_op(train_logits, train_labels, name='train')
+    train_loss_op = loss_op(train_logits, train_labels, name='train', reg_terms=reg_terms)
 
     valid_images, valid_labels = inputs(name='validation', num_epochs=None)
     valid_logits = inference_op(valid_images, train=False)
     valid_accuracy_op = accuracy_op(valid_logits, valid_labels, name='validation')
+    valid_loss_op = loss_op(valid_logits, valid_labels, name='valid', reg_terms=reg_terms)
 
     test_images, test_labels = inputs(name='test', num_epochs=None)
     test_logits = inference_op(test_images, train=False)
     test_accuracy_op = accuracy_op(test_logits, test_labels, name='test')
+    test_loss_op = loss_op(test_logits, test_labels, name='test', reg_terms=reg_terms)
 
     kwargs = {
             'train_accuracy_op': train_accuracy_op,
             'valid_accuracy_op': valid_accuracy_op,
             'test_accuracy_op':  test_accuracy_op,
+            'train_loss_op':     train_loss_op,
+            'valid_loss_op':     valid_loss_op,
+            'test_loss_op':      test_loss_op,
             'name': name,
             }
 
     # if desired, do training (with evaluation)
     if do_training:
-        run_training(logits=logits, labels=labels, learning_rate=learning_rate, **kwargs)
+        run_training(logits=logits, labels=labels, learning_rate=learning_rate, reg_terms=reg_terms, **kwargs)
     else: # otherwise just evaluate
         run_eval(**kwargs)
 
     # and do prediction on Kaggle test images
-    kaggle_images = inputs(name='kaggle', num_epochs=1, predict=True)
+    kaggle_images, kaggle_image_ids = inputs(name='kaggle', num_epochs=1, predict=True)
     kaggle_logits = inference_op(kaggle_images, train=False)
 
-    run_prediction(logits=kaggle_logits, name=name)
+    run_prediction(logits=kaggle_logits, image_ids=kaggle_image_ids, name=name)
