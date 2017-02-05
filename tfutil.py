@@ -202,14 +202,13 @@ def create_if_needed(path):
 
 ######## TRAINING AND EVALUATION
 """Reset graph and remove temporary files, including logs, checkpoints and Kaggle predictions."""
-def run_cleanup(name, do_training):
+def run_cleanup(name):
     tf.reset_default_graph()
 
-    if do_training:
-        for file in glob.glob(log_dir(name, pattern=True)):
-            os.remove(file)
-        for file in glob.glob(checkpoint_dir(name, pattern=True)):
-            os.remove(file)
+    for file in glob.glob(log_dir(name, pattern=True)):
+        os.remove(file)
+    for file in glob.glob(checkpoint_dir(name, pattern=True)):
+        os.remove(file)
     if os.path.isfile(prediction_file(name)):
         os.remove(prediction_file(name))
 
