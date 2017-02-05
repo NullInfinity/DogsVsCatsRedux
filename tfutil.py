@@ -155,9 +155,15 @@ def accuracy_op(logits, labels, name=''):
     return accuracy
 
 """Add nodes to the graph to do training and track the overall training step."""
-def train_op(loss, learning_rate):
-    global_step = tf.Variable(0, name='global_step', trainable=False)
-    return tf.train.AdamOptimizer(learning_rate).minimize(loss, global_step=global_step)
+def train_op(loss, learning_rate, optimizer=tf.train.AdamOptimizer):
+    global_step = tf.get_variable(
+            name='global_step',
+            shape=[],
+            initializer=tf.constant_initializer(value=0),
+            trainable=False,
+            dtype=tf.int32,
+            )
+    return optimizer(learning_rate).minimize(loss, global_step=global_step)
 
 """Evaluate operation `op` over a number of batches.
 
