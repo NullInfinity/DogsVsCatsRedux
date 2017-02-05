@@ -55,28 +55,29 @@ def clean_all_bottlenecks():
         print('Removing {}'.format(record_file))
         os.remove(record_file)
 
-def _write_bottleneck(sess, step, images, bottleneck_tensor, input_tensor, writer, **kwargs_unused):
-    image = sess.run(tf.reshape(images, [1, 299, 299, 3]))
-    bottleneck_value = sess.run(bottleneck_tensor, feed_dict={input_tensor: image})
+
+def _write_bottleneck(sess, step, bottleneck_tensor, label_tensor, writer, **kwargs_unused):
+    bottleneck_value, label_value = sess.run([bottleneck_tensor, label_tensor])
+
     bottleneck_raw = bottleneck_value.flatten().tolist()
+    label_raw = label_value.flatten().tolist()
+
     example = tf.train.Example(features=tf.train.Features(feature={
-        'bottleneck_value': tf.train.Feature(float_list=tf.train.FloatList(value=bottleneck_raw))
+        'bottleneck': tf.train.Feature(float_list=tf.train.FloatList(value=bottleneck_raw)),
+        'label': tf.train.Feature(int64_list=tf.train.Int64List(value=label_raw)),
     }))
+
     writer.write(example.SerializeToString())
 
-def save_bottlenecks(name, bottleneck_tensor, input_tensor):
+
+def save_bottlenecks(name):
     bottleneck_file = os.path.join(FLAGS['BOTTLENECK_DIR'], name + '.tfrecords')
     print('Saving bottlenecks to {}...'.format(bottleneck_file), end='')
     writer = tf.python_io.TFRecordWriter(bottleneck_file)
-    images = tf.reshape(
-        # predict=True means no shuffling (and no labels returned)
-        dataset.inputs(name=name, num_epochs=1, batch_size=1, predict=True),
-        [1, 299, 299, 3],
-    )
+    bottleneck_tensor, label_tensor = get_bottlenecks(name)
     kwargs = {
-            'images': images,
             'bottleneck_tensor': bottleneck_tensor,
-            'input_tensor': input_tensor,
+            'label_tensor': label_tensor,
             'writer': writer,
             'name': name,
             }
@@ -85,9 +86,8 @@ def save_bottlenecks(name, bottleneck_tensor, input_tensor):
 
 """Save all bottlenecks."""
 def save_all_bottlenecks():
-    bottleneck_tensor, input_tensor = load_inception()
-    for name in ['train', 'validation', 'test']:
-        save_bottlenecks(name=name, bottleneck_tensor=bottleneck_tensor, input_tensor=input_tensor)
+    for name in ['train', 'validation', 'test', 'kaggle']:
+        save_bottlenecks(name=name)
 
 """Load the Inception graph."""
 def load_inception():
