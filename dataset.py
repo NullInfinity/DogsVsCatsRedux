@@ -38,17 +38,14 @@ def _raw_inputs(name, num_epochs, predict):
     file_queue = tf.train.string_input_producer([os.path.join(FLAGS['DATA_DIR'], name+'.tfrecords')], num_epochs=num_epochs)
     reader = tf.TFRecordReader()
     _, serialized_example = reader.read(file_queue)
-    if predict:
-        features = tf.parse_single_example(serialized_example, features={
-            'image_raw': tf.FixedLenFeature([], tf.string),
-            })
-        label = None
-    else:
-        features = tf.parse_single_example(serialized_example, features={
-            'image_raw': tf.FixedLenFeature([], tf.string),
-            'label': tf.FixedLenFeature([], tf.int64),
-            })
-        label = tf.cast(features['label'], tf.float32)
+    features = tf.parse_single_example(serialized_example, features={
+        'image_raw': tf.FixedLenFeature([], tf.string),
+        'label': tf.FixedLenFeature([], tf.int64),
+        })
+
+    label = features['label']
+    if not predict:
+        label = tf.cast(label, tf.float32)
 
     image = tf.decode_raw(features['image_raw'], tf.uint8)
     image.set_shape(image_len())
@@ -69,9 +66,6 @@ def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=F
     if not display:
         image = tf.cast(image, tf.float32) * (1./255) - 0.5
 
-    if predict:
-        return tf.train.batch([image], batch_size=batch_size, capacity=1000+3*batch_size, allow_smaller_final_batch=True, num_threads=4)
-
     images, labels = tf.train.shuffle_batch([image, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, allow_smaller_final_batch=True, num_threads=4)
     labels = tf.reshape(labels, [batch_size, 1])
     return images, labels
@@ -91,7 +85,7 @@ Arguments:
     files   the list of input JPEG files
     name    the desired record filename (will have a .tfrecords extension added)
 """
-def save_records(files, name, omit_labels=False):
+def save_records(files, name, kaggle=False):
     file_queue = tf.train.string_input_producer(files, num_epochs=1, shuffle=False)
 
     record_file = os.path.join(FLAGS['DATA_DIR'], name + '.tfrecords')
@@ -107,20 +101,18 @@ def save_records(files, name, omit_labels=False):
     try:
         while not coord.should_stop():
             filename, image = sess.run(read_image(file_queue))
-            label = int(b'dog' in filename)
+            if kaggle:
+                # for kaggle set, label means the id of the image
+                basename = os.path.splitext(os.path.basename(filename))[0]
+                label = int(basename)
+            else:
+                label = int(b'dog' in filename)
             image_raw = image.tostring()
 
-            if omit_labels:
-                # no need to save height, width and depth as this is known to be 299x299x3
-                example = tf.train.Example(features=tf.train.Features(feature={
-                    'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
-                    }))
-            else:
-                # no need to save height, width and depth as this is known to be 299x299x3
-                example = tf.train.Example(features=tf.train.Features(feature={
-                    'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
-                    'label': tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
-                    }))
+            example = tf.train.Example(features=tf.train.Features(feature={
+                'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image_raw])),
+                'label': tf.train.Feature(int64_list=tf.train.Int64List(value=[label])),
+                }))
 
             writer.write(example.SerializeToString())
     except tf.errors.OutOfRangeError:
@@ -154,7 +146,7 @@ def save_training_records():
 """Save Kaggle test data to a .tfrecords file."""
 def save_kaggle_records():
     files = glob(os.path.join(FLAGS['DATA_DIR'], FLAGS['KAGGLE_DIR'], FLAGS['IMAGE_PATTERN']))
-    save_records(files, 'kaggle', omit_labels=True)
+    save_records(files, 'kaggle', kaggle=True)
 
 """Save all .tfrecords files."""
 def save_all_records():
