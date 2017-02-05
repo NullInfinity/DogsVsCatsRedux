@@ -16,7 +16,37 @@ FLAGS = {
         'BOTTLENECK_DIR':               './bottleneck/',
         'BOTTLENECK_TENSOR_NAME':       'pool_3/_reshape:0',
         'RESIZED_INPUT_TENSOR_NAME':    'ResizeBilinear:0',
+        'BATCH_SIZE':                   100,
 }
+
+def _raw_inputs(name, num_epochs, predict):
+    file_queue = tf.train.string_input_producer([os.path.join(FLAGS['BOTTLENECK_DIR'], name+'.tfrecords')], num_epochs=num_epochs)
+    reader = tf.TFRecordReader()
+    _, serialized_example = reader.read(file_queue)
+    features = tf.parse_single_example(serialized_example, features={
+        'bottleneck': tf.FixedLenFeature([2048], tf.float32),
+        'label': tf.FixedLenFeature([1], tf.int64),
+        })
+
+    label = features['label']
+    if not predict:
+        label = tf.cast(label, tf.float32)
+
+    bottleneck = features['bottleneck']
+
+    return bottleneck, label
+
+"""Return a batch of bottleneck, label pairs.
+
+Arguments:
+    name    the TFRecord bottleneck file to read, e.g. `train` or `test`
+"""
+def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, predict=False):
+    bottleneck, label = _raw_inputs(name, num_epochs, predict=predict)
+
+    bottlenecks, labels = tf.train.shuffle_batch([bottleneck, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, num_threads=8)
+
+    return bottlenecks, labels
 
 """Remove any previous bottleneck files."""
 def clean_all_bottlenecks():
