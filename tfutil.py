@@ -218,8 +218,9 @@ def run_setup(name):
     create_if_needed(checkpoint_dir(name))
 
 """Run some operation inside a session, starting threads as needed."""
-def run_in_tf(func, after, name, checkpoint=None, **func_args):
+def run_in_tf(func, after, name, checkpoint=None, step=None, **func_args):
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+
     try:
         saver = tf.train.Saver(max_to_keep=10, keep_checkpoint_every_n_hours=1)
     except ValueError: # no variables to save
@@ -237,7 +238,8 @@ def run_in_tf(func, after, name, checkpoint=None, **func_args):
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
 
-    step = 0
+    if step is None:
+        step = 0
 
     kwargs = {
             'sess': sess,
@@ -267,7 +269,9 @@ def run_in_tf(func, after, name, checkpoint=None, **func_args):
     coord.join(threads)
     sess.close()
 
-"""Run training, write summaries and do evaluation, given computed logits and labels.
+    return step
+
+"""Run training, write summaries and save checkpoints.
 
 Arguments:
     logits              the computed logits
