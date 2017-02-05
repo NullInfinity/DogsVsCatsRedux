@@ -66,7 +66,7 @@ def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=F
     if not display:
         image = tf.cast(image, tf.float32) * (1./255) - 0.5
 
-    images, labels = tf.train.shuffle_batch([image, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, allow_smaller_final_batch=True, num_threads=4)
+    images, labels = tf.train.shuffle_batch([image, label], batch_size=batch_size, capacity=1000+3*batch_size, min_after_dequeue=1000, num_threads=8)
     labels = tf.reshape(labels, [batch_size, 1])
     return images, labels
 
