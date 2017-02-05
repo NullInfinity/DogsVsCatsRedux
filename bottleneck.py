@@ -89,24 +89,31 @@ def save_all_bottlenecks():
     for name in ['train', 'validation', 'test', 'kaggle']:
         save_bottlenecks(name=name)
 
-"""Load the Inception graph."""
-def load_inception():
+"""Load the Inception graph with our inputs mapped in."""
+def get_bottlenecks(name):
     reader = tf.WholeFileReader()
     graph_def = tf.GraphDef()
+
     with open(FLAGS['MODEL_FILE'], 'rb') as graph_file:
         graph_raw = graph_file.read()
 
+    # predict=True means labels are not cast to tf.float32
+    input_tensor, label_tensor = dataset.inputs(name=name, batch_size=1, num_epochs=1, predict=True)
+    input_tensor = tf.reshape(input_tensor, [1, 299, 299, 3])
+
     with tf.Session() as sess:
         graph_def.ParseFromString(graph_raw)
-        bottleneck_tensor, resized_input_tensor = tf.import_graph_def(
+        bottleneck_tensor = tf.import_graph_def(
             graph_def,
-            name='',
+            input_map={
+                FLAGS['RESIZED_INPUT_TENSOR_NAME']: input_tensor,
+                },
             return_elements=[
                 FLAGS['BOTTLENECK_TENSOR_NAME'],
-                FLAGS['RESIZED_INPUT_TENSOR_NAME'],
                 ]
-            )
-    return bottleneck_tensor, resized_input_tensor
+            )[0]
+    return bottleneck_tensor, label_tensor
+
 
 if __name__ == '__main__':
     clean_all_bottlenecks()
