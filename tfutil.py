@@ -274,14 +274,17 @@ def run_in_tf(func, after, name, checkpoint=None, step=None, **func_args):
 """Run training, write summaries and save checkpoints.
 
 Arguments:
-    logits              the computed logits
-    labels              the known training labels
-    valid_accuracy_op   operation to compute model accuracy on validation set
-                        (if set to `None`, validation accuracy is not calcuated)
-    test_accuracy_op    operation to compute model accuracy on test set
-                        (if set to `None`, test accuracy is not calcuated)
-    name                the name of the model, used for log and checkpoint directories
-    learning_rate       the learning rate to use for training
+    name            a name for the operation (used to label checkpoints and log files)
+    optimizer       the optimizer to use for training
+    learning_rate   the learning rate to pass to the optimizer
+    step            the starting global step (use this to resume training without
+                    producing confusing log files
+    inference_op    this function should build the inference graph and return the logits
+    reg_terms       a dictionary of regularization terms to pass to the loss function
+    num_epochs      the number of epochs of data to train over
+
+Returns:
+    The final global step which can be used to later resume training.
 """
 def run_training(logits, labels, name, learning_rate, reg_terms, **kwargs):
     loss = loss_op(logits, labels, reg_terms=reg_terms)
@@ -298,7 +301,7 @@ def run_training(logits, labels, name, learning_rate, reg_terms, **kwargs):
 def _print_avg_op(sess, op, label, percent=False):
     if op is not None:
         avg_value = avg_op(sess, op)
-        number_format_string = '.1%' if percent else '.2f'
+        number_format_string = '.1%' if percent else '.3f'
         format_string = '{}: {:' + number_format_string + '}'
         print(format_string.format(label, avg_value))
 
@@ -310,7 +313,7 @@ def _training_func(loss, train, log_writer, summary_op, train_accuracy_op, valid
         summary, xentropy = sess.run([summary_op, loss])
         saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
         log_writer.add_summary(summary, global_step=step)
-        print('Cross Entropy: {xentropy:.2n}'.format(xentropy=xentropy))
+        print('Cross Entropy: {xentropy:.3f}'.format(xentropy=xentropy))
 
     if step % 100 == 0:
         summary = sess.run(summary_op)
