@@ -18,7 +18,7 @@ FLAGS = {
         'SRC_DIR':          './raw/train/',
         'KAGGLE_DIR':       './raw/test/',
         'LOG_DIR':          './log/',
-        'CHECKPOINT_DIR':   './checkpoints/',
+        'CHECKPOINT_DIR':   './checkpoint/',
         'IMAGE_PATTERN':    '*.jpg',
 
         'TRAIN_SIZE' :      0.8,
