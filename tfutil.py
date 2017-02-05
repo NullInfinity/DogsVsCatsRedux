@@ -286,17 +286,45 @@ Arguments:
 Returns:
     The final global step which can be used to later resume training.
 """
-def run_training(logits, labels, name, learning_rate, reg_terms, **kwargs):
-    loss = loss_op(logits, labels, reg_terms=reg_terms)
-    train = train_op(loss, learning_rate=learning_rate)
+def run_training(name, learning_rate, num_epochs, inference_op, inputs, reg_terms, optimizer, step=None):
+    tf.reset_default_graph()
+    checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
 
-    run_in_tf(func=_training_func,
+    images, labels = inputs(name='train', num_epochs=num_epochs)
+    logits = inference_op(images, reg_terms=reg_terms, train=True)
+    loss = loss_op(logits, labels, reg_terms=reg_terms)
+
+    train = train_op(loss, learning_rate=learning_rate, optimizer=optimizer)
+
+    train_images, train_labels = inputs(name='train', num_epochs=None)
+    train_logits = inference_op(train_images, reg_terms=reg_terms, train=False, share=True)
+    train_accuracy_op = accuracy_op(train_logits, train_labels, name='train')
+    train_loss_op = loss_op(train_logits, train_labels, name='train', reg_terms=reg_terms)
+
+    valid_images, valid_labels = inputs(name='validation', num_epochs=None)
+    valid_logits = inference_op(valid_images, reg_terms=reg_terms, train=False, share=True)
+    valid_accuracy_op = accuracy_op(valid_logits, valid_labels, name='validation')
+    valid_loss_op = loss_op(valid_logits, valid_labels, name='valid', reg_terms=reg_terms)
+
+    kwargs = {
+            'loss':                 loss,
+            'train':                train,
+            'reg_terms':            reg_terms,
+            'train_accuracy_op':    train_accuracy_op,
+            'valid_accuracy_op':    valid_accuracy_op,
+            'test_accuracy_op':     None,
+            'train_loss_op':        train_loss_op,
+            'valid_loss_op':        valid_loss_op,
+            'test_loss_op':         None,
+            'name':                 name,
+            'checkpoint':           checkpoint,
+            'step':                 step,
+            }
+
+    return run_in_tf(func=_training_func,
               after=_training_after,
-              name=name,
-              loss=loss,
-              train=train,
-              reg_terms=reg_terms,
-              **kwargs)
+              **kwargs
+              )
 
 def _print_avg_op(sess, op, label, percent=False):
     if op is not None:
@@ -328,14 +356,27 @@ def _training_after(sess, saver, step, name, **kwargs):
     _run_eval(sess=sess, **kwargs)
 
 """Make predictions given a logit node in the graph, using the model at its current state of training."""
-def run_prediction(logits, image_ids, name):
+def run_prediction(name, inference_op, inputs, reg_terms):
+    tf.reset_default_graph()
+
     outfile = open(prediction_file(name), 'wb')
     outfile.write(b'id,label\n')
 
-    activation_op = tf.nn.sigmoid(logits)
+    kaggle_images, kaggle_image_ids = inputs(name='kaggle', num_epochs=1, predict=True)
+    kaggle_logits = inference_op(kaggle_images, reg_terms=reg_terms, train=False)
+
+    activation_op = tf.nn.sigmoid(kaggle_logits)
     checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
 
-    run_in_tf(func=_prediction_func, after=_prediction_after, outfile=outfile, activation_op=activation_op, image_ids=image_ids, checkpoint=checkpoint, name=name)
+    kwargs = {
+            'outfile':          outfile,
+            'activation_op':    activation_op,
+            'image_ids':        kaggle_image_ids,
+            'checkpoint':       checkpoint,
+            'name':             name
+            }
+
+    run_in_tf(func=_prediction_func, after=_prediction_after, **kwargs)
 
     outfile.close()
 
@@ -350,52 +391,25 @@ def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name,
 def _prediction_after(step, name, **kwargs):
     print('Wrote {} predictions to {}'.format(step * FLAGS['BATCH_SIZE'], prediction_file(name)))
 
-def run_eval(name, **kwargs):
-    checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
-    run_in_tf(func=None, after=_run_eval, name='eval', checkpoint=checkpoint, **kwargs)
-    pass
+def run_eval(name, inference_op, reg_terms, inputs):
+    tf.reset_default_graph()
 
-def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, train_loss_op, valid_loss_op, test_loss_op, **kwargs):
-    _print_avg_op(sess=sess, op=train_accuracy_op, label='Train Accuracy', percent=True)
-    _print_avg_op(sess=sess, op=valid_accuracy_op, label='Validation Accuracy', percent=True)
-    _print_avg_op(sess=sess, op=test_accuracy_op, label='Test Accuracy', percent=True)
-    _print_avg_op(sess=sess, op=train_loss_op, label='Train Loss')
-    _print_avg_op(sess=sess, op=valid_loss_op, label='Validation Loss')
-    _print_avg_op(sess=sess, op=test_loss_op, label='Test Loss')
-
-"""Run all operations.
-
-Arguments:
-    inference_op    function returning the inference operation (essentially the network graph)
-    inputs          function returning input batches
-    total_epochs    number of epochs of training data for which to train
-    learning_rate   learning rate hyperparameter passed to the optimizer
-    name            the name of the network (used as a sub directory for logs, checkpoints, etc)
-"""
-def run_all(inference_op, inputs, total_epochs, learning_rate, name, reg_terms, do_training=True):
-    run_cleanup(name=name, do_training=do_training)
-    run_setup(name=name)
-
-    ## create graph nodes for prediction on train, validation and test sets
-
-    images, labels = inputs(name='train', num_epochs=total_epochs)
-    logits = inference_op(images, train=True)
-
-    # train images again for evaluation purposes
     train_images, train_labels = inputs(name='train', num_epochs=None)
-    train_logits = inference_op(train_images, train=False)
+    train_logits = inference_op(train_images, reg_terms=reg_terms, train=False)
     train_accuracy_op = accuracy_op(train_logits, train_labels, name='train')
     train_loss_op = loss_op(train_logits, train_labels, name='train', reg_terms=reg_terms)
 
     valid_images, valid_labels = inputs(name='validation', num_epochs=None)
-    valid_logits = inference_op(valid_images, train=False)
+    valid_logits = inference_op(valid_images, reg_terms=reg_terms, train=False, share=True)
     valid_accuracy_op = accuracy_op(valid_logits, valid_labels, name='validation')
     valid_loss_op = loss_op(valid_logits, valid_labels, name='valid', reg_terms=reg_terms)
 
     test_images, test_labels = inputs(name='test', num_epochs=None)
-    test_logits = inference_op(test_images, train=False)
+    test_logits = inference_op(test_images, reg_terms=reg_terms, train=False, share=True)
     test_accuracy_op = accuracy_op(test_logits, test_labels, name='test')
     test_loss_op = loss_op(test_logits, test_labels, name='test', reg_terms=reg_terms)
+
+    checkpoint = tf.train.get_checkpoint_state(checkpoint_dir(name))
 
     kwargs = {
             'train_accuracy_op': train_accuracy_op,
@@ -404,17 +418,16 @@ def run_all(inference_op, inputs, total_epochs, learning_rate, name, reg_terms, 
             'train_loss_op':     train_loss_op,
             'valid_loss_op':     valid_loss_op,
             'test_loss_op':      test_loss_op,
-            'name': name,
+            'checkpoint':        checkpoint,
+            'name':              name,
             }
 
-    # if desired, do training (with evaluation)
-    if do_training:
-        run_training(logits=logits, labels=labels, learning_rate=learning_rate, reg_terms=reg_terms, **kwargs)
-    else: # otherwise just evaluate
-        run_eval(**kwargs)
+    run_in_tf(func=None, after=_run_eval, **kwargs)
 
-    # and do prediction on Kaggle test images
-    kaggle_images, kaggle_image_ids = inputs(name='kaggle', num_epochs=1, predict=True)
-    kaggle_logits = inference_op(kaggle_images, train=False)
-
-    run_prediction(logits=kaggle_logits, image_ids=kaggle_image_ids, name=name)
+def _run_eval(sess, train_accuracy_op, valid_accuracy_op, test_accuracy_op, train_loss_op, valid_loss_op, test_loss_op, **kwargs):
+    _print_avg_op(sess=sess, op=train_accuracy_op, label='Train Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=valid_accuracy_op, label='Validation Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=test_accuracy_op, label='Test Accuracy', percent=True)
+    _print_avg_op(sess=sess, op=train_loss_op, label='Train Loss')
+    _print_avg_op(sess=sess, op=valid_loss_op, label='Validation Loss')
+    _print_avg_op(sess=sess, op=test_loss_op, label='Test Loss')
