@@ -109,9 +109,6 @@ def pool_op(X, size, stride, name, padding='SAME', mode='avg'):
             raise BadPoolMode()
     return h_pool
 
-# global dictionary of regularisation terms
-_reg_terms = dict()
-
 # alpha - scale factor for L2 regularisation
 def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=True):
     with tf.variable_scope(name):
@@ -125,13 +122,10 @@ def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=Tr
         else:
             h_out = h_fc
 
-        # regularisation
         loss_name = name + '_loss'
-        loss = alpha * tf.nn.l2_loss(weights, name=loss_name)
-
-    # register loss
-    if reg_terms is not None and not tf.get_variable_scope().reuse: # if reuse is set, don't add regularisation termloss again
-        reg_terms.append(alpha * loss)
+        reg_term = alpha * tf.nn.l2_loss(weights, name=loss_name)
+        if reg_terms is not None:
+            reg_terms[name] = reg_term
 
     return h_out
 
@@ -146,8 +140,8 @@ def loss_op(logits, labels, name='', reg_terms=None):
     loss = cross_entropy_avg
 
     if reg_terms is not None:
-        for reg_term in reg_terms:
-            loss += reg_term
+        for key in reg_terms:
+            loss += reg_terms[key]
 
     return loss
 
