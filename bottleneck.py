@@ -9,12 +9,16 @@ import os.path
 import tensorflow as tf
 
 import dataset
+from inception_v4 import inception_v4, inception_v4_arg_scope
 import tfutil as tfu
 
 FLAGS = {
-        'MODEL_FILE':                   './inception/classify_image_graph_def.pb',
+        #'MODEL_FILE':                   './inception/classify_image_graph_def.pb',
+        'CHECKPOINT_DIR':               './',
+        'CHECKPOINT_FILE':              'inception_v4.ckpt',
         'BOTTLENECK_DIR':               './bottleneck/',
         'BOTTLENECK_TENSOR_NAME':       'pool_3/_reshape:0',
+        'BOTTLENECK_SIZE':              1536,
         'RESIZED_INPUT_TENSOR_NAME':    'ResizeBilinear:0',
         'BATCH_SIZE':                   100,
 }
@@ -24,7 +28,7 @@ def _raw_inputs(name, num_epochs, predict):
     reader = tf.TFRecordReader()
     _, serialized_example = reader.read(file_queue)
     features = tf.parse_single_example(serialized_example, features={
-        'bottleneck': tf.FixedLenFeature([2048], tf.float32),
+        'bottleneck': tf.FixedLenFeature([FLAGS['BOTTLENECK_SIZE']], tf.float32),
         'label': tf.FixedLenFeature([1], tf.int64),
         })
 
@@ -80,6 +84,7 @@ def save_bottlenecks(name):
             'label_tensor': label_tensor,
             'writer': writer,
             'name': name,
+            'checkpoint_path': os.path.join(FLAGS['CHECKPOINT_DIR'], FLAGS['CHECKPOINT_FILE']),
             }
     tfu.run_in_tf(func=_write_bottleneck, after=None, **kwargs)
     print('done.')
@@ -89,30 +94,27 @@ def save_all_bottlenecks():
     for name in ['train', 'validation', 'test', 'kaggle']:
         save_bottlenecks(name=name)
 
-"""Load the Inception graph with our inputs mapped in."""
+"""Build an Inception v4 graph using TF-Slim and load a checkpoint."""
 def get_bottlenecks(name):
-    reader = tf.WholeFileReader()
-    graph_def = tf.GraphDef()
+    tf.reset_default_graph()
 
-    with open(FLAGS['MODEL_FILE'], 'rb') as graph_file:
-        graph_raw = graph_file.read()
+    inputs, labels = dataset.inputs(name=name, batch_size=1, num_epochs=1, predict=True)
+    inputs = tf.reshape(inputs, [1, 299, 299, 3])
 
-    # predict=True means labels are not cast to tf.float32
-    input_tensor, label_tensor = dataset.inputs(name=name, batch_size=1, num_epochs=1, predict=True)
-    input_tensor = tf.reshape(input_tensor, [1, 299, 299, 3])
-
-    with tf.Session() as sess:
-        graph_def.ParseFromString(graph_raw)
-        bottleneck_tensor = tf.import_graph_def(
-            graph_def,
-            input_map={
-                FLAGS['RESIZED_INPUT_TENSOR_NAME']: input_tensor,
-                },
-            return_elements=[
-                FLAGS['BOTTLENECK_TENSOR_NAME'],
-                ]
-            )[0]
-    return bottleneck_tensor, label_tensor
+    # note about num_classes:
+    # we set num_classes=1001 so that the output layer weights are the same size as in the checkpoint
+    # otherwise restoring raises an InvalidArgumentError
+    # we could of course also use `inception_v4_base` to output the model without the output layer
+    # but this way we can still use the final pooling and dropout layers from the original architecture
+    # we don't care about the size of num_classes since we are only interested in `PreLogitsFlatten` anyway
+    with tf.contrib.slim.arg_scope(inception_v4_arg_scope()):
+        _, end_points = inception_v4(
+                inputs=inputs,
+                num_classes=1001,
+                create_aux_logits=False,
+                is_training=False
+                )
+    return end_points['PreLogitsFlatten'], labels
 
 
 if __name__ == '__main__':
