@@ -118,16 +118,18 @@ def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=Tr
 
         h_fc = tf.matmul(X, weights) + bias
         if relu:
-            h_out = tf.nn.relu(h_fc)
+            activation = tf.nn.relu(h_fc)
         else:
-            h_out = h_fc
+            activation = h_fc
 
         loss_name = name + '_loss'
         reg_term = alpha * tf.nn.l2_loss(weights, name=loss_name)
         if reg_terms is not None:
             reg_terms[name] = reg_term
 
-    return h_out
+        tf.summary.histogram(name=name+'_weights', values=activation)
+
+    return activation
 
 ######## GRAPH BUILDING
 """Add nodes to the graph to compute cross entropy and write it to summary files."""
