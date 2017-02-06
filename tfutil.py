@@ -220,7 +220,7 @@ def run_setup(name):
     create_if_needed(checkpoint_dir(name))
 
 """Run some operation inside a session, starting threads as needed."""
-def run_in_tf(func, after, name, checkpoint=None, step=None, **func_args):
+def run_in_tf(func, after, name, checkpoint_path=None, checkpoint=None, step=None, **func_args):
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
     try:
@@ -234,8 +234,13 @@ def run_in_tf(func, after, name, checkpoint=None, step=None, **func_args):
     log_writer = tf.summary.FileWriter(logdir=os.path.join(FLAGS['LOG_DIR'], name), graph=sess.graph)
 
     sess.run(init_op)
-    if checkpoint and saver is not None:
-        saver.restore(sess, checkpoint.model_checkpoint_path)
+
+    # checkpoint_path takes precedence over checkpoint
+    if saver is not None:
+        if checkpoint_path is not None:
+            saver.restore(sess, checkpoint_path)
+        elif checkpoint is not None:
+            saver.restore(sess, checkpoint.model_checkpoint_path)
 
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
@@ -358,7 +363,7 @@ def _training_after(sess, saver, step, name, **kwargs):
     _run_eval(sess=sess, **kwargs)
 
 """Make predictions given a logit node in the graph, using the model at its current state of training."""
-def run_prediction(name, inference_op, inputs, reg_terms):
+def run_prediction(name, inference_op, inputs, reg_terms, clip=False):
     tf.reset_default_graph()
 
     outfile = open(prediction_file(name), 'wb')
@@ -375,7 +380,8 @@ def run_prediction(name, inference_op, inputs, reg_terms):
             'activation_op':    activation_op,
             'image_ids':        kaggle_image_ids,
             'checkpoint':       checkpoint,
-            'name':             name
+            'name':             name,
+            'clip':             clip,
             }
 
     run_in_tf(func=_prediction_func, after=_prediction_after, **kwargs)
@@ -383,15 +389,17 @@ def run_prediction(name, inference_op, inputs, reg_terms):
     outfile.close()
 
 # helper ops for run_prediction
-def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name, **kwargs_unused):
+def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name, clip, **kwargs_unused):
     dog_prob, image_id = sess.run([activation_op, image_ids])
+    if clip:
+        np.clip(dog_prob, a_min=0.05, a_max=0.95, out=dog_prob)
     dog_prob = dog_prob.reshape([-1, 1])
 
     np.savetxt(fname=outfile, X=np.append(image_id, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
     outfile.flush()
 
 def _prediction_after(step, name, **kwargs):
-    print('Wrote {} predictions to {}'.format(step * FLAGS['BATCH_SIZE'], prediction_file(name)))
+    print('Wrote predictions to {}'.format(prediction_file(name)))
 
 def run_eval(name, inference_op, reg_terms, inputs):
     tf.reset_default_graph()
