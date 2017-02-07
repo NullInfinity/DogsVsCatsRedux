@@ -401,7 +401,7 @@ def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name,
     np.savetxt(fname=outfile, X=np.append(image_id, dog_prob, 1), fmt=['%i', '%.2f'], delimiter=',')
     outfile.flush()
 
-def _prediction_after(step, name, **kwargs):
+def _prediction_after(step, name, clip, **kwargs):
     print('Wrote predictions to {}'.format(prediction_file(name, clip=clip)))
 
 def run_eval(name, inference_op, reg_terms, inputs):
