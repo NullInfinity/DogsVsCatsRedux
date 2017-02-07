@@ -194,8 +194,9 @@ def log_dir(name, pattern=False):
 def checkpoint_dir(name, pattern=False):
     return get_dir('CHECKPOINT', name, pattern=pattern)
 
-def prediction_file(name):
-    return os.path.join(FLAGS['DATA_DIR'], name + '.csv')
+def prediction_file(name, clip=False):
+    filename = name + ('_clipped' if clip else '') + '.csv'
+    return os.path.join(FLAGS['DATA_DIR'], filename)
 
 def create_if_needed(path):
     # TODO should really check if `path` is an ordinary file and raise an Exception
@@ -211,8 +212,10 @@ def run_cleanup(name):
         os.remove(file)
     for file in glob.glob(checkpoint_dir(name, pattern=True)):
         os.remove(file)
-    if os.path.isfile(prediction_file(name)):
-        os.remove(prediction_file(name))
+    for clip in [False, True]:
+        filename = prediction_file(name, clip=clip)
+        if os.path.isfile(filename):
+            os.remove(filename)
 
 """Create log and checkpoint subdirectories."""
 def run_setup(name):
@@ -366,7 +369,7 @@ def _training_after(sess, saver, step, name, **kwargs):
 def run_prediction(name, inference_op, inputs, reg_terms, clip=False):
     tf.reset_default_graph()
 
-    outfile = open(prediction_file(name), 'wb')
+    outfile = open(prediction_file(name, clip=clip), 'wb')
     outfile.write(b'id,label\n')
 
     kaggle_images, kaggle_image_ids = inputs(name='kaggle', num_epochs=1, predict=True)
