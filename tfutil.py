@@ -402,7 +402,7 @@ def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name,
     outfile.flush()
 
 def _prediction_after(step, name, **kwargs):
-    print('Wrote predictions to {}'.format(prediction_file(name)))
+    print('Wrote predictions to {}'.format(prediction_file(name, clip=clip)))
 
 def run_eval(name, inference_op, reg_terms, inputs):
     tf.reset_default_graph()
