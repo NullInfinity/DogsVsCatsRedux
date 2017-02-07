@@ -43,7 +43,12 @@ def _raw_inputs(name, num_epochs, predict):
 """Return a batch of bottleneck, label pairs.
 
 Arguments:
-    name    the TFRecord bottleneck file to read, e.g. `train` or `test`
+    name        the TFRecord file to read, e.g. `train` or `test`
+    batch_size  the size of the batch
+    num_epochs  the number of epochs of data to read before terminating
+    predict     whether data will be used for training/evaluation or prediction
+                if predict=True, the label is either `1` for dog or `0` for cat
+                if predict=False, the label is the numerical image ID of each unlabelled image
 """
 def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, predict=False):
     bottleneck, label = _raw_inputs(name, num_epochs, predict=predict)
@@ -74,6 +79,13 @@ def _write_bottleneck(sess, step, bottleneck_tensor, label_tensor, writer, **kwa
     writer.write(example.SerializeToString())
 
 
+"""Save a list of bottlenecks and their labels to a TFRecord file.
+
+Arguments:
+    name    the desired record filename (will have a .tfrecords extension added)
+            input data is also read from a TFRecord file with the same name in
+            the data/ folder
+"""
 def save_bottlenecks(name):
     bottleneck_file = os.path.join(FLAGS['BOTTLENECK_DIR'], name + '.tfrecords')
     print('Saving bottlenecks to {}...'.format(bottleneck_file), end='')
@@ -118,6 +130,7 @@ def get_bottlenecks(name):
     return end_points['PreLogitsFlatten'], labels
 
 
+# run as script to regenerate TFRecord files
 if __name__ == '__main__':
     clean_all_bottlenecks()
     save_all_bottlenecks()

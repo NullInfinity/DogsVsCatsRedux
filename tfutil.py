@@ -17,9 +17,7 @@ modified for ReLU nonlinearities, see e.g. arXiv:1502.01852 [cs.CV].
 
 Arguments:
     shape   the shape of the variable
-    dtype   the datatype of the variable (default: `tf.float32`)
-    mean    the mean of the distribution (default: `0`)
-    stddev  the standard deviation of the distribution (default: `0.1`)
+    factor  the multiplicative factor to tweak Xavier initialization
 
 Returns:
     A `tf.Variable` with the above properties.
@@ -29,9 +27,6 @@ def weight_variable(shape, factor=1.43):
             name='weights',
             shape=shape,
             initializer=tf.uniform_unit_scaling_initializer(
-                # this factor of ~sqrt(2) in the stddev (i.e. 2 in the variance)
-                # has been found to be suitable when relu nonlinearities are used
-                # see, e.g. arXiv:1502.01852 [cs.CV]
                 factor=factor,
                 dtype=tf.float32)
             )
@@ -66,7 +61,6 @@ by a `tf.name_scope`.
 
 Arguments:
     shape   the shape of the variable
-    dtype   the datatype of the variable (default: `tf.float32`)
     value   the constant value for initialization
 
 Returns:
@@ -83,6 +77,7 @@ def bias_variable(shape, value=0.1):
 
 
 ######## NETWORK BUILDING
+"""Create a convolutional layer with stride `[1,stride,stride,1]`."""
 def conv_op(X, size, channels, name, stride, padding='SAME', relu=True):
     with tf.variable_scope(name):
         weights = conv_weight_variable(size=size, channels=channels)
@@ -94,10 +89,12 @@ def conv_op(X, size, channels, name, stride, padding='SAME', relu=True):
             h_out = h_conv
     return h_out
 
+"""Exception raised if pooling mode below is set to a value other than `avg` or `max`."""
 class BadPoolMode(Exception):
     pass
 
-def pool_op(X, size, stride, name, padding='SAME', mode='avg'):
+"""Create a pooling layer with size `[1,size,size,1]` and stride `[1,stride,stride,1]`."""
+def pool_op(X, size, stride, name, padding='SAME', mode='max'):
     ksize = [1, size, size, 1]
     strides = [1, stride, stride, 1]
     with tf.variable_scope(name):
@@ -110,6 +107,19 @@ def pool_op(X, size, stride, name, padding='SAME', mode='avg'):
     return h_pool
 
 # alpha - scale factor for L2 regularisation
+"""Create a fully connected layer.
+
+Arguments:
+    X               the input tensor
+    channels_in     size of the input tensor
+    channels_out    size of the output tensor
+    name            name of the operation
+    reg_terms       dictionary to which regularization terms will be added for
+                    use by the loss function
+    alpha           scale factor for the regularization term
+    relu            if set to False, disables the nonlinearity, e.g. for the
+                    output layer
+"""
 def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=True):
     with tf.variable_scope(name):
         weights = fc_weight_variable(channels_in, channels_out)
@@ -132,7 +142,9 @@ def fc_op(X, channels_in, channels_out, name, reg_terms=None, alpha=0.0, relu=Tr
     return activation
 
 ######## GRAPH BUILDING
-"""Add nodes to the graph to compute cross entropy and write it to summary files."""
+"""Add nodes to the graph to compute cross entropy and write it to summary files.
+
+Also adds any regularization terms to the loss operation before returning it."""
 def loss_op(logits, labels, name='', reg_terms=None):
     name = name + ('_' if name else '') + 'xentropy'
     cross_entropy = tf.nn.sigmoid_cross_entropy_with_logits(logits=logits, labels=labels, name=name)
@@ -188,16 +200,20 @@ def avg_op(sess, op, num_examples=2500):
 def get_dir(main, name, pattern):
     return os.path.join(FLAGS[main+'_DIR'], name, '*' if pattern else '')
 
+"""Returns a named subdirectory of the log directory."""
 def log_dir(name, pattern=False):
     return get_dir('LOG', name, pattern=pattern)
 
+"""Returns a named subdirectory of the checkpoint directory."""
 def checkpoint_dir(name, pattern=False):
     return get_dir('CHECKPOINT', name, pattern=pattern)
 
+"""Returns a named prediction file."""
 def prediction_file(name, clip=False):
     filename = name + ('_clipped' if clip else '') + '.csv'
     return os.path.join(FLAGS['DATA_DIR'], filename)
 
+"""Create a directory if it doesn't already exist."""
 def create_if_needed(path):
     # TODO should really check if `path` is an ordinary file and raise an Exception
     if not os.path.isdir(path):
@@ -222,7 +238,17 @@ def run_setup(name):
     create_if_needed(log_dir(name))
     create_if_needed(checkpoint_dir(name))
 
-"""Run some operation inside a session, starting threads as needed."""
+"""Run some operation inside a session, starting threads as needed.
+
+Arguments:
+    func            function to run in the main loop
+    after           function to run after the loop
+    name            name for the operation
+    checkpoint_path path of a trained checkpoint file to restore
+    checkpoint      checkpoint object to restore from (only used if checkpoint_path=None)
+    step            the starting global step, 0 used if None
+    func_args       keyword args to be passed to `func` and `after`
+"""
 def run_in_tf(func, after, name, checkpoint_path=None, checkpoint=None, step=None, **func_args):
     init_op = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
 
@@ -292,6 +318,7 @@ Arguments:
     inference_op    this function should build the inference graph and return the logits
     reg_terms       a dictionary of regularization terms to pass to the loss function
     num_epochs      the number of epochs of data to train over
+    inputs          this function should return batches of data and labels, e.g. `dataset.inputs`
 
 Returns:
     The final global step which can be used to later resume training.
@@ -365,7 +392,15 @@ def _training_after(sess, saver, step, name, **kwargs):
         saver.save(sess, os.path.join(FLAGS['CHECKPOINT_DIR'], name, name), global_step=step)
     _run_eval(sess=sess, **kwargs)
 
-"""Make predictions given a logit node in the graph, using the model at its current state of training."""
+"""Make predictions given a logit node in the graph, using the model at its current state of training.
+
+Arguments:
+    name            a name for the operation (used to label checkpoints and log files)
+    inference_op    this function should build the inference graph and return the logits
+    reg_terms       a dictionary of regularization terms to pass to the loss function
+    clip            if `clip=True`, output probabilities are clipped to `[0.05,0.95]`
+    inputs          this function should return batches of data and labels, e.g. `dataset.inputs`
+"""
 def run_prediction(name, inference_op, inputs, reg_terms, clip=False):
     tf.reset_default_graph()
 
@@ -404,6 +439,14 @@ def _prediction_func(outfile, activation_op, image_ids, sess, saver, step, name,
 def _prediction_after(step, name, clip, **kwargs):
     print('Wrote predictions to {}'.format(prediction_file(name, clip=clip)))
 
+"""Make predictions given a logit node in the graph, using the model at its current state of training.
+
+Arguments:
+    name            a name for the operation (used to label checkpoints and log files)
+    inference_op    this function should build the inference graph and return the logits
+    reg_terms       a dictionary of regularization terms to pass to the loss function
+    inputs          this function should return batches of data and labels, e.g. `dataset.inputs`
+"""
 def run_eval(name, inference_op, reg_terms, inputs):
     tf.reset_default_graph()
 

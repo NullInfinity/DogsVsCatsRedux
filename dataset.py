@@ -1,7 +1,5 @@
 """Handles dataset preprocessing into TFRecords files.
 
-Based on the TensorFlow reading input howto, among other things.
-
 Running as a script purges tfrecord files before regenerating them.
 """
 
@@ -26,9 +24,15 @@ FLAGS = {
         'BATCH_SIZE':       50,
         }
 
+"""The length of flattened image vectors."""
 def image_len():
     return FLAGS['IMAGE_SIZE'] ** 2 * FLAGS['IMAGE_CHANNELS']
 
+"""The dimensions of unflattened images.
+
+Arguments:
+    include_channels    whether to include the channel dimension
+"""
 def image_dim(include_channels=False):
     if include_channels:
         return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_CHANNELS'])
@@ -55,9 +59,14 @@ def _raw_inputs(name, num_epochs, predict):
 """Return a batch of image, label pairs.
 
 Arguments:
-    name    the TFRecord file to read, e.g. `train` or `test`
-    display if `True`, the pixel values are not normalised to [-0.5, 0.5],
-            so that the images can be easily displayed on screen.
+    name        the TFRecord file to read, e.g. `train` or `test`
+    display     if `True`, the pixel values are not normalised to [-0.5, 0.5],
+                so that the images can be easily displayed on screen.
+    batch_size  the size of the batch
+    num_epochs  the number of epochs of data to read before terminating
+    predict     whether data will be used for training/evaluation or prediction
+                if predict=True, the label is either `1` for dog or `0` for cat
+                if predict=False, the label is the numerical image ID of each unlabelled image
 """
 def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, predict=False):
     image, label = _raw_inputs(name, num_epochs, predict=predict)
@@ -71,19 +80,29 @@ def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=F
     return images, labels
 
 reader = tf.WholeFileReader()
-# read JPEG data from a file, decode it into an image (i.e. numpy array), then resize it appropriately
+
+"""Read JPEG data from a file, decode it into an image, then resize it appropriately.
+
+Arguments:
+    filename_queue  the TensorFlow queue of filenames
+
+Returns:
+    The filename; and the image as a NumPy array
+"""
 def read_image(filename_queue):
     key, content = reader.read(filename_queue)
     image = tf.cast(tf.image.resize_images(tf.image.decode_jpeg(content), image_dim()), dtype=tf.uint8)
     return key, image
 
-"""Save a list of images given by `files`, and their labels, to the record file `name.tfrecords`.
+"""Save a list of images and their labels to a TFRecord file.
 
 Some preprocessing is performed. For details see `read_image`.
 
 Arguments:
     files   the list of input JPEG files
     name    the desired record filename (will have a .tfrecords extension added)
+    kaggle  if kaggle=False, the labels is `1` for dog and `0` for cat
+            if kaggle=True, the label is the image ID of each unlabelled image
 """
 def save_records(files, name, kaggle=False):
     file_queue = tf.train.string_input_producer(files, num_epochs=1, shuffle=False)
@@ -153,7 +172,7 @@ def save_all_records():
     save_training_records()
     save_kaggle_records()
 
-
+# run as script to regenerate TFRecord files
 if __name__ == '__main__':
     clean_all_records()
     save_all_records()
