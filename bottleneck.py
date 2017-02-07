@@ -112,7 +112,8 @@ def get_bottlenecks(name):
                 inputs=inputs,
                 num_classes=1001,
                 create_aux_logits=False,
-                is_training=False
+                is_training=False,
+                dropout_keep_prob=1.0,
                 )
     return end_points['PreLogitsFlatten'], labels
 
