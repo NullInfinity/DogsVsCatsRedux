@@ -33,10 +33,11 @@ and half dogs (the validation set in particular is quite small).
 ### Convolutional Network
 
 My primary model is a convolutional network with a number of convolutional
-layers with mostly small filtersstacked into several groups separated by max
-pooling layers.  This model is trained and evaluated in `Convolution.ipynb`.
-The model attains about `88%` accuracy and scores `0.33956` on the Kaggle
-leaderboard.  with a loosely similar design to [VGG16/19][VGG].
+layers with mostly small filters stacked into several groups separated by max
+pooling layers. Though the specific architecture is different, this is
+generally similar to [VGG16/19][VGG]. The model is trained and evaluated in
+`Convolution.ipynb`. It model attains about `88%` accuracy and scores
+`0.33956` on the Kaggle leaderboard.
 
 ### Transfer Learning
 
@@ -45,28 +46,33 @@ penultimate layer of Google's [Inception v4 network][Inception4]. This analysis
 is contained in `DogsVsCats_Inception.ipynb`. The model attains about `99.5%`
 accuracy and attains a loss of `0.073` on the Kaggle leaderboard.
 
-## Notes
+## General Notes
 
 ### Overfitting
 
-While minimizing the cross entropy on the training
-batches, the accuracy is computed periodically on the validation set. If the
-validation error starts to increase while the training cross entropy is still
-falling, overfitting is probably occuring. I do not plot any learning graphs in
-the notebooks, but the cross entropy and validation error are recorded with a
-TensorFlow `SummarySaver`, so plots can be viewed with TensorBoard. Log output
-to the console from training can also be used to roughly see when overfitting
-starts to occur.
+While minimizing the cross entropy on the training batches, the accuracy is
+computed periodically on the validation set. If the validation error starts to
+increase while the training cross entropy is still falling, it is likely that
+overfitting is occuring. I do not plot any learning graphs in the notebooks,
+but the cross entropy and validation error are recorded with a TensorFlow
+`SummarySaver`, so plots can be viewed with TensorBoard. Log output to the
+console from training can also be used to roughly track training against
+validation loss/error.
 
-For both models, the cross entropy computed on the local validation and test
-sets was usually lower than the cross entropy score computed by Kaggle. This may
-suggest some problems with generalisation of the model. If this is overfitting,
-it could be helped by larger validation/test sets or cross validation (along
-with the corresponding increase in computation time due to multiple training
-sets). Additionally, to help the model generalise, it could be useful to apply
-random distortions and noise to the training images on each iteration. This
-would require redesigning my input pipeline so I have omitted it for now, but it
-may be worth experimenting with in the future.
+For both models, the validation and test loss matched the training loss well
+following training. However, the loss on the Kaggle public leaderboard was
+usually a little higher (though still satisfactory). This could suggest the
+dreaded [public test set overfitting][KaggleOverfitting]. However, this seems
+unlikely due to the low number of submissions. On the other hand, the test set
+and especially the validation set were quite small, which might be why I failed
+to fully protect against overfitting.
+
+The obvious solution would be larger validation and test sets. Given the limited
+data available, one could employ cross validation, but since the networks are relatively slow to train, this would have a high computational cost.
+
+There are a number of additional options for improving performance and
+generalisation, such as heavier regularization or stopping training earlier. For
+more possibilities, see the section below on [future work](#future-work).
 
 ### Initialization
 
@@ -228,6 +234,15 @@ the previous notebook.
 | test       | 99.7%    | 0.033   |
 | kaggle     |          | 0.0733  |
 
+## Future Work
+
+Additionally, to help the model generalise, it could be useful to apply random
+distortions and noise to the training images on each iteration. This would
+require redesigning my input pipeline so I have omitted it for now, but it may
+be worth experimenting with in the future.
+
+
+
 [DogsVsCats]:         https://www.kaggle.com/c/dogs-vs-cats
 [DogsVsCatsRedux]:    https://www.kaggle.com/c/dogs-vs-cats-redux-kernels-edition
 [VGG]:                https://arxiv.org/abs/1409.1556
@@ -237,3 +252,4 @@ the previous notebook.
 [SPP]:                https://arxiv.org/abs/1406.4729
 [TFSlim]:             https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/slim
 [TFSlimModels]:       https://github.com/tensorflow/models/tree/master/slim#pre-trained-models
+[KaggleOverfitting]:  http://blog.mrtz.org/2015/03/09/competition.html
