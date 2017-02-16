@@ -24,20 +24,19 @@ preprocessing was also applied to the unlabeled Kaggle data so the trained model
 could be easily applied to it later.  Both the preprocessing into TFRecord
 files, and feeding data to the model at runtime is handled by `dataset.py`.
 
-The [introductory notebook](Introduction.ipynb) displays some sample images from
-the dataset and verifies that each dataset (train, validation and test) contains
-an even
+The [introductory notebook](Introduction.ipynb) displays some sample images
+from the dataset. It also verifies that each dataset contains about half cats
+and half dogs (the validation set in particular is quite small).
 
 ## The Models
 
 ### Convolutional Network
 
-My primary model is a convnet with mostly small
-convolutional filters stacked into several groups of convolutional layers
-separated by max pooling layers.  This model is trained and evaluated in
-`DogsVsCats_Conv.ipynb`. The model attains about `88%` accuracy and scores
-`0.33956` on the Kaggle leaderboard.  with a loosely similar design to
-[VGG16/19][VGG].
+My primary model is a convolutional network with a number of convolutional
+layers with mostly small filtersstacked into several groups separated by max
+pooling layers.  This model is trained and evaluated in `Convolution.ipynb`.
+The model attains about `88%` accuracy and scores `0.33956` on the Kaggle
+leaderboard.  with a loosely similar design to [VGG16/19][VGG].
 
 ### Transfer Learning
 
