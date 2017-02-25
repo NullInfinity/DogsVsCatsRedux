@@ -76,11 +76,14 @@ more possibilities, see the section below on [future work](#future-work).
 
 ### Initialization
 
-Since I use relu nonlinearities, I use a modified version of Xavier
-initialization with initial weights for a node drawn from a uniform distribution
-of variance $2/n$ where $n$ is the number of inputs of the node.  This
-initialization strategy is justified [here][ModifiedXavier].  In TensorFlow this
-is handled internally by the `tf.uniform_unit_scaling_initializer`.
+When initializing weights in deep neural networks, one generally wants the
+scale of the variance to remain unchanged between layers. This helps prevent
+either vanishing or explosion of the backpropagated gradients. I use the
+inbuilt `tf.uniform_unit_scaling_initializer` to achieve this, using the scale
+factor of `1.43` specific to the ReLU nonlinearity. This approach and the
+specific factor for the ReLU are numerically justified by [Sussillo and
+Abbott][RWI]. For more information on Xavier initialization modified for ReLU
+nonlinearities, see also this [paper by Microsoft Research][ModifiedXavier].
 
 ### tfutil
 
@@ -250,6 +253,7 @@ be worth experimenting with in the future.
 [ModifiedXavier]:     https://arxiv.org/abs/1502.01852
 [BatchNorm]:          https://arxiv.org/abs/1502.03167
 [SPP]:                https://arxiv.org/abs/1406.4729
+[RWI]:                https://arxiv.org/abs/1412.6558
 [TFSlim]:             https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/slim
 [TFSlimModels]:       https://github.com/tensorflow/models/tree/master/slim#pre-trained-models
 [KaggleOverfitting]:  http://blog.mrtz.org/2015/03/09/competition.html
