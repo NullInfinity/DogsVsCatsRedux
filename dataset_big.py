@@ -90,10 +90,9 @@ def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=F
 
 """Apply optional distortions to an image."""
 def distort(image):
-    resize_value = tf.random_uniform([], 1.0, 1.2)
-
     image = tf.expand_dims(image, 0)
 
+    resize_value = tf.random_uniform([], 1.0, 1.2)
     new_size = tf.cast(
         tf.multiply(
             tf.cast(image_dim(), dtype=tf.float32),
@@ -120,7 +119,6 @@ def read_image(filename_queue, predict, reader):
 
     image = tf.image.decode_jpeg(content, channels=3)
     image = distort(image)
-    image = tf.cast(image, dtype=tf.uint8)
 
     # extract label from filename
     pieces = tf.decode_csv(
@@ -137,11 +135,15 @@ def read_image(filename_queue, predict, reader):
     if predict:
         num_fields = 2
 
-    label = tf.decode_csv(
+    string_label = tf.decode_csv(
         pieces[-1],
         record_defaults=[['']] * num_fields,
         field_delim='.',
     )[0]
+    string_label = tf.squeeze(string_label)
+
+    label = tf.equal(string_label, tf.constant('dog'))
+    label = tf.cast(label, tf.float32)
 
     return image, label
 
