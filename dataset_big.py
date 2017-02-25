@@ -21,7 +21,8 @@ FLAGS = {
 
         'TRAIN_SIZE' :      0.8,
         'TEST_SIZE':        0.15,
-        'BATCH_SIZE':       50,
+        # for inception, batch size must be 1
+        'BATCH_SIZE':       1,
         }
 
 # for now, train/validation/test split is chosen when module is loaded
@@ -32,10 +33,13 @@ def data_files_split():
     # TODO use FLAGS['TEST_SIZE'] to compute test_size appropriately below
     valid_files, test_files = train_test_split(valid_files, test_size=0.50)
 
+    kaggle_files = glob(os.path.join(FLAGS['DATA_DIR'], FLAGS['KAGGLE_DIR'], FLAGS['IMAGE_PATTERN']))
+
     return {
         'train': train_files,
         'validation': valid_files,
         'test': test_files,
+        'kaggle': kaggle_files,
     }
 
 data_files = data_files_split()
@@ -54,27 +58,6 @@ def image_dim(include_channels=False):
         return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_CHANNELS'])
     return (FLAGS['IMAGE_SIZE'], FLAGS['IMAGE_SIZE'])
 
-def _raw_inputs(name, num_epochs, predict):
-    file_list = data_files[name]
-    file_queue = tf.train.string_input_producer(file_list, num_epochs=num_epochs)
-
-    key, image = read_image(file_queue)
-
-    if not predict:
-        label = tf.cast(label, tf.float32)
-
-    # extract label from filename
-    pieces = tf.sparse_tensor_to_dense(
-        tf.string_split([key], delimiter='/'),
-        default_value=''
-    )
-    label = tf.sparse_tensor_to_dense(
-        tf.string_split(pieces[:, -1], delimiter='.'),
-        default_value=''
-    )[0, 0]
-
-    return image, label
-
 """Return a batch of image, label pairs.
 
 Arguments:
@@ -88,7 +71,10 @@ Arguments:
                 if predict=False, the label is the numerical image ID of each unlabelled image
 """
 def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, predict=False):
-    image, label = _raw_inputs(name, num_epochs, predict=predict)
+    file_list = data_files[name]
+    filename_queue = tf.train.string_input_producer(file_list, num_epochs=num_epochs)
+
+    image, label = read_image(filename_queue=filename_queue, predict=predict)
 
     images, labels = tf.train.shuffle_batch(
         [image, label],
@@ -98,11 +84,26 @@ def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=F
         num_threads=8
     )
     labels = tf.reshape(labels, [batch_size, 1])
+
     return images, labels
 
 """Apply optional distortions to an image."""
 def distort(image):
-    #TODO implement this
+    resize_value = tf.random_uniform([], 1.0, 1.2)
+
+    image = tf.expand_dims(image, 0)
+
+    new_size = tf.cast(
+        tf.multiply(
+            tf.cast(image_dim(), dtype=tf.float32),
+            resize_value
+            ),
+        dtype=tf.int32
+    )
+    image = tf.image.resize_bilinear(image, new_size)
+    image = tf.random_crop(image, (1,) + image_dim(include_channels=True))
+
+    image = tf.squeeze(image)
     return image
 
 """Decode JPEG data from a file and distort it if required.
@@ -113,12 +114,36 @@ Arguments:
 Returns:
     The filename and the (distorted) image as a NumPy array
 """
-def read_image(filename_queue):
+reader = tf.WholeFileReader()
+def read_image(filename_queue, predict):
     key, content = reader.read(filename_queue)
-    image = tf.image.decode_jpeg(content)
+
+    image = tf.image.decode_jpeg(content, channels=3)
     image = distort(image)
     image = tf.cast(image, dtype=tf.uint8)
-    return key, image
+
+    # extract label from filename
+    pieces = tf.decode_csv(
+        key,
+        record_defaults=[['']] * 6,
+        field_delim='/',
+        )
+
+    # if predict=False, we have labelled images with filenames like
+    #   dog.1234.jpg
+    # if predict=True, we have unlabelled images with filenames like
+    #   1234.jpg
+    num_fields = 3
+    if predict:
+        num_fields = 2
+
+    label = tf.decode_csv(
+        pieces[-1],
+        record_defaults=[['']] * num_fields,
+        field_delim='.',
+    )[0]
+
+    return image, label
 
 """Save a list of images and their labels to a TFRecord file.
 Some preprocessing is performed. For details see `read_image`.
