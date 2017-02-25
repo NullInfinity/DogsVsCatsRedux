@@ -73,8 +73,9 @@ Arguments:
 def inputs(name='train', batch_size=FLAGS['BATCH_SIZE'], num_epochs=1, display=False, predict=False):
     file_list = data_files[name]
     filename_queue = tf.train.string_input_producer(file_list, num_epochs=num_epochs)
+    reader = tf.WholeFileReader()
 
-    image, label = read_image(filename_queue=filename_queue, predict=predict)
+    image, label = read_image(filename_queue=filename_queue, predict=predict, reader=reader)
 
     images, labels = tf.train.shuffle_batch(
         [image, label],
@@ -114,8 +115,7 @@ Arguments:
 Returns:
     The filename and the (distorted) image as a NumPy array
 """
-reader = tf.WholeFileReader()
-def read_image(filename_queue, predict):
+def read_image(filename_queue, predict, reader):
     key, content = reader.read(filename_queue)
 
     image = tf.image.decode_jpeg(content, channels=3)
