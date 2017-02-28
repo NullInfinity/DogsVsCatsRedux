@@ -12,13 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-
-# This is the TF-Slim Inception v4 creation code from https://github.com/tensorflow/models/
-# Calls to tf.concat have been modified to use the new argument order; see:
-# * https://groups.google.com/a/tensorflow.org/forum/#!msg/discuss/OePXmC9kJ7o/SRErOoYCDQAJ
-# Changes have also been made for Python 3 compatibility (`xrange` replaced with `range` if necessary)
-# [Alex Thorne]
-
 """Contains the definition of the Inception V4 architecture.
 
 As described in http://arxiv.org/abs/1602.07261.
@@ -33,17 +26,10 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-#from nets import inception_utils
-# instead import inception_utils as standalone file from current directory [Alex Thorne]
-import inception_utils
+from nets import inception_utils
 
 slim = tf.contrib.slim
 
-# fix xrange for Python 3 [Alex Thorne]
-try:
-    xrange(1)
-except:
-    xrange = range
 
 def block_inception_a(inputs, scope=None, reuse=None):
   """Builds Inception-A block for Inception v4 network."""
@@ -63,7 +49,7 @@ def block_inception_a(inputs, scope=None, reuse=None):
       with tf.variable_scope('Branch_3'):
         branch_3 = slim.avg_pool2d(inputs, [3, 3], scope='AvgPool_0a_3x3')
         branch_3 = slim.conv2d(branch_3, 96, [1, 1], scope='Conv2d_0b_1x1')
-      return tf.concat([branch_0, branch_1, branch_2, branch_3], 3)
+      return tf.concat(3, [branch_0, branch_1, branch_2, branch_3])
 
 
 def block_reduction_a(inputs, scope=None, reuse=None):
@@ -83,7 +69,7 @@ def block_reduction_a(inputs, scope=None, reuse=None):
       with tf.variable_scope('Branch_2'):
         branch_2 = slim.max_pool2d(inputs, [3, 3], stride=2, padding='VALID',
                                    scope='MaxPool_1a_3x3')
-      return tf.concat([branch_0, branch_1, branch_2], 3)
+      return tf.concat(3, [branch_0, branch_1, branch_2])
 
 
 def block_inception_b(inputs, scope=None, reuse=None):
@@ -107,7 +93,7 @@ def block_inception_b(inputs, scope=None, reuse=None):
       with tf.variable_scope('Branch_3'):
         branch_3 = slim.avg_pool2d(inputs, [3, 3], scope='AvgPool_0a_3x3')
         branch_3 = slim.conv2d(branch_3, 128, [1, 1], scope='Conv2d_0b_1x1')
-      return tf.concat([branch_0, branch_1, branch_2, branch_3], 3)
+      return tf.concat(3, [branch_0, branch_1, branch_2, branch_3])
 
 
 def block_reduction_b(inputs, scope=None, reuse=None):
@@ -129,7 +115,7 @@ def block_reduction_b(inputs, scope=None, reuse=None):
       with tf.variable_scope('Branch_2'):
         branch_2 = slim.max_pool2d(inputs, [3, 3], stride=2, padding='VALID',
                                    scope='MaxPool_1a_3x3')
-      return tf.concat([branch_0, branch_1, branch_2], 3)
+      return tf.concat(3, [branch_0, branch_1, branch_2])
 
 
 def block_inception_c(inputs, scope=None, reuse=None):
@@ -142,20 +128,20 @@ def block_inception_c(inputs, scope=None, reuse=None):
         branch_0 = slim.conv2d(inputs, 256, [1, 1], scope='Conv2d_0a_1x1')
       with tf.variable_scope('Branch_1'):
         branch_1 = slim.conv2d(inputs, 384, [1, 1], scope='Conv2d_0a_1x1')
-        branch_1 = tf.concat([
+        branch_1 = tf.concat(3, [
             slim.conv2d(branch_1, 256, [1, 3], scope='Conv2d_0b_1x3'),
-            slim.conv2d(branch_1, 256, [3, 1], scope='Conv2d_0c_3x1')], 3)
+            slim.conv2d(branch_1, 256, [3, 1], scope='Conv2d_0c_3x1')])
       with tf.variable_scope('Branch_2'):
         branch_2 = slim.conv2d(inputs, 384, [1, 1], scope='Conv2d_0a_1x1')
         branch_2 = slim.conv2d(branch_2, 448, [3, 1], scope='Conv2d_0b_3x1')
         branch_2 = slim.conv2d(branch_2, 512, [1, 3], scope='Conv2d_0c_1x3')
-        branch_2 = tf.concat([
+        branch_2 = tf.concat(3, [
             slim.conv2d(branch_2, 256, [1, 3], scope='Conv2d_0d_1x3'),
-            slim.conv2d(branch_2, 256, [3, 1], scope='Conv2d_0e_3x1')], 3)
+            slim.conv2d(branch_2, 256, [3, 1], scope='Conv2d_0e_3x1')])
       with tf.variable_scope('Branch_3'):
         branch_3 = slim.avg_pool2d(inputs, [3, 3], scope='AvgPool_0a_3x3')
         branch_3 = slim.conv2d(branch_3, 256, [1, 1], scope='Conv2d_0b_1x1')
-      return tf.concat([branch_0, branch_1, branch_2, branch_3], 3)
+      return tf.concat(3, [branch_0, branch_1, branch_2, branch_3])
 
 
 def inception_v4_base(inputs, final_endpoint='Mixed_7d', scope=None):
@@ -206,7 +192,7 @@ def inception_v4_base(inputs, final_endpoint='Mixed_7d', scope=None):
         with tf.variable_scope('Branch_1'):
           branch_1 = slim.conv2d(net, 96, [3, 3], stride=2, padding='VALID',
                                  scope='Conv2d_0a_3x3')
-        net = tf.concat([branch_0, branch_1], 3)
+        net = tf.concat(3, [branch_0, branch_1])
         if add_and_check_final('Mixed_3a', net): return net, end_points
 
       # 73 x 73 x 160
@@ -221,7 +207,7 @@ def inception_v4_base(inputs, final_endpoint='Mixed_7d', scope=None):
           branch_1 = slim.conv2d(branch_1, 64, [7, 1], scope='Conv2d_0c_7x1')
           branch_1 = slim.conv2d(branch_1, 96, [3, 3], padding='VALID',
                                  scope='Conv2d_1a_3x3')
-        net = tf.concat([branch_0, branch_1], 3)
+        net = tf.concat(3, [branch_0, branch_1])
         if add_and_check_final('Mixed_4a', net): return net, end_points
 
       # 71 x 71 x 192
@@ -232,7 +218,7 @@ def inception_v4_base(inputs, final_endpoint='Mixed_7d', scope=None):
         with tf.variable_scope('Branch_1'):
           branch_1 = slim.max_pool2d(net, [3, 3], stride=2, padding='VALID',
                                      scope='MaxPool_1a_3x3')
-        net = tf.concat([branch_0, branch_1], 3)
+        net = tf.concat(3, [branch_0, branch_1])
         if add_and_check_final('Mixed_5a', net): return net, end_points
 
       # 35 x 35 x 384
